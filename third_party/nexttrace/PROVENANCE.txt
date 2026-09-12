@@ -1,0 +1,6 @@
+NextTrace NTrace-core v1.7.3
+Commit: 40ac803ca233b0bc3d4b3bf1cacc8f7e0d8368f2
+Go: 1.26.5 windows/amd64 CGO_ENABLED=0
+Source: tools/NextTraceGeoHelper in the accompanying source package
+Changes: JSON protocol adapter, bounded lifetime, stdout isolation, session cache, input validation, verified TLS v4 transport (official endpoint/header, credentials over private stdin). Upstream source unmodified.
+SHA256: 087d966cf8cd0b32bdbcaaf795673640892dffb058528a6ddedc059f337ae972

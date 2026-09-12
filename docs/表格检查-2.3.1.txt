@@ -1,0 +1,26 @@
+PASS: overview hides private hops and merges only adjacent same-city same-network nodes
+PASS: merged RTT spans per-hop means and timeouts do not dilute averages
+PASS: merged rows retain IPs, sample counts and individual probe evidence
+PASS: endpoint stays separate and zero-millisecond native timing is displayed as less than one
+PASS: show-all restores private rows with accurate private-address wording
+PASS: filtering an unresponsive hop cannot create artificial adjacency
+PASS: unresponsive rows have no fabricated zero RTT
+PASS: filtering a private hop cannot merge through it
+PASS: a city change splits otherwise matching backbone rows
+PASS: a network change splits same-city rows
+PASS: unknown city is not evidence of a shared city
+PASS: matching province-only geography is not collapsed as matching cities
+PASS: same-named cities in different countries do not merge
+PASS: multiple IPs at one TTL stay on separate rows and block cross-TTL merging
+PASS: a hidden private alternative still preserves multipath ambiguity
+PASS: one IP repeated across merged hops is shown once while preserving hop range
+PASS: target echo reply is never merged with an intermediate TTL-expiry response
+PASS: private-address target remains visible under the default filter
+PASS: explicit diagnostic errors remain visible and do not supply successful RTT
+PASS: invalid numeric RTT values cannot corrupt a node mean
+PASS: merged range flags nodes with no valid RTT instead of silently treating them as zero
+PASS: unrecorded TTL is distinct from a probe timeout
+PASS: fully filtered route retains an explanation count
+PASS: overview retains every filtered row in hop order including the target
+PASS: table cannot mix a route with another route's annotation
+ALL 25 TABLE CHECKS PASSED.

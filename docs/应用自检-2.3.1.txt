@@ -1,0 +1,38 @@
+PASS new installation enables both annotation options without auto-starting a target
+PASS missing flags in old settings preserve offline mode and other user settings
+PASS existing view-only preference is not expanded to background queries
+PASS disabled parent annotation switch overrides an inconsistent background flag
+PASS existing automatic annotation preference remains enabled
+PASS unreadable existing settings fail back to offline mode instead of new-install defaults
+PASS automatic annotation settings persist and provider disclosure remains in annotation settings
+PASS disabling online annotations clears and disables background queries
+PASS start and live samples
+PASS both protocols sampled independently
+PASS switch to TCP statistics
+PASS switch back to ICMP statistics
+PASS hidden window continues sampling
+PASS stop cancels further samples and unlocks settings
+PASS restart after stop
+PASS export saved history
+PASS native route history persisted
+PASS native tray initialized
+PASS diagnostic bundle export in NativeAOT app
+PASS existing offline settings remain off after upgrade
+PASS NativeAOT cache renders ASN/operator/location/source without HTTP
+PASS local route nodes receive an offline annotation
+PASS online annotation preference persists
+PASS 24-hour selector controls shared chart and heatmap data
+PASS seven-day selector renders date/hour matrix and matching chart
+PASS hour cells switch between latency and failure rate
+PASS overview displays classified route summary without opening history
+PASS overview aligns IP, city, network and RTT in five columns
+PASS overview hides private and unresponsive rows while retaining a private target
+PASS native overview displays merged hop range and range of per-hop RTT means
+PASS expanding a merged row reveals both IPs and their individual RTTs
+PASS show-all restores filtered nodes in the overview table
+PASS overview renders all ten filtered rows with no six-row cutoff
+PASS single show-all switch exposes all twelve nodes without an additional expand step
+PASS NativeAOT details retain registry evidence, missing ASN and city
+PASS NativeAOT reinterprets a legacy snapshot offline and retains its first annotation
+PASS earliest legacy view preserves its content without invented new counters
+PASS rendered graph and heatmap retain matching sample counts

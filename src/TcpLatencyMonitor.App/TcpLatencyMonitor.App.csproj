@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>TcpLatencyMonitor.App</RootNamespace>
+    <AssemblyName>IpQualityMonitor</AssemblyName>
+    <Version>2.7.1</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <WinUISDKReferences>false</WinUISDKReferences>
+    <WindowsPackageType>None</WindowsPackageType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="..\..\third_party\nexttrace\NextTraceGeoHelper.exe" Link="NextTraceGeoHelper.exe" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\third_party\nexttrace\LICENSE" Link="licenses\NextTrace-GPLv3.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\third_party\nexttrace\PROVENANCE.txt" Link="licenses\NextTrace-provenance.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Manifest Include="$(ApplicationManifest)" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.1839" />
+    <!-- NativeAOT needs the C#/WinRT source generator to emit the managed
+         ICustomPropertyProvider/collection adapters used by WinUI ItemsSource. -->
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.3.1" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.0.1" />
+    <!-- Keep Windows App SDK AI references available to the compiler without shipping
+         unused ONNX/DirectML runtime assets in this monitoring-only client. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK.AI" Version="2.0.185">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>compile</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.0.300">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>compile</IncludeAssets>
+    </PackageReference>
+    <ProjectReference Include="..\TcpLatencyMonitor.Core\TcpLatencyMonitor.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Windows App SDK 2.0 currently omits application-owned PRI/XBF files from
+       an unpackaged dotnet publish directory. Copy the compiled XAML resources
+       explicitly so the portable folder can load MainWindow.xaml at runtime. -->
+  <Target Name="CopyApplicationXamlResourcesToPublish"
+          AfterTargets="Publish"
+          Condition="'$(PublishDir)' != ''">
+    <ItemGroup>
+      <ApplicationXamlResource Include="$(TargetDir)**\*.xbf" />
+      <ApplicationPriResource Include="$(TargetDir)$(AssemblyName).pri" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ApplicationXamlResource)"
+          DestinationFiles="@(ApplicationXamlResource->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ApplicationPriResource)"
+          DestinationFolder="$(PublishDir)"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

@@ -1,0 +1,383 @@
+name: Build & Release
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    tags: [ "v*" ]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/*.yml"
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/*.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.allow_fail || false }}
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [windows, freebsd, openbsd, linux, dragonfly]
+        goarch: [amd64, 386]
+        exclude:
+          - goarch: 386
+            goos: dragonfly
+        include:
+          - { goos: linux,   goarch: arm,    goarm: 7 }
+          - { goos: linux,   goarch: arm,    goarm: 6 }
+          - { goos: linux,   goarch: arm,    goarm: 5 }
+          - { goos: android, goarch: arm64 }
+          - { goos: windows, goarch: arm64 }
+          # windows/arm 已于 Go 1.26 移除
+          - { goos: linux,   goarch: arm64 }
+          - { goos: linux,   goarch: riscv64 }
+          - { goos: linux,   goarch: loong64 }
+          - { goos: linux,   goarch: mips64 }
+          - { goos: linux,   goarch: mips64le }
+          - { goos: linux,   goarch: mipsle }
+          - { goos: linux,   goarch: mips }
+          - { goos: linux,   goarch: mipsle, gomips: softfloat }
+          - { goos: linux,   goarch: mips,   gomips: softfloat }
+          - { goos: linux,   goarch: ppc64 }
+          - { goos: linux,   goarch: ppc64le }
+          - { goos: freebsd, goarch: arm64 }
+          - { goos: freebsd, goarch: arm,    goarm: 7 }
+          - { goos: linux,   goarch: s390x }
+          - { goos: openbsd, goarch: arm64 }
+          - { goos: openbsd, goarch: arm,    goarm: 7 }
+    env:
+      CGO_ENABLED: ${{ matrix.goos == 'android' && 1 || 0 }}
+      GOOS:   ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+      GOARM:  ${{ matrix.goarm }}
+      GOMIPS: ${{ matrix.gomips }}
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Go (built-in cache)
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.5'
+          check-latest: true
+          cache: true
+
+      - name: Show Go toolchain info
+        run: |
+          set -Eeuo pipefail
+          go version && go env && echo "Supported targets (dist list):" && go tool dist list | sort -u
+
+      - name: Setup Android NDK
+        if: matrix.goos == 'android'
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          add-to-path: false
+
+      - name: Resolve build metadata
+        run: |
+          set -Eeuo pipefail
+          BUILD_VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
+          BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          COMMIT_SHA1="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+          ARM_SUFFIX=""
+          if [ -n "${GOARM:-}" ]; then ARM_SUFFIX="v${GOARM}"; fi
+          PLATFORM="${GOOS}_${GOARCH}${ARM_SUFFIX}"
+          EXT=""
+          if [ "${GOOS}" = "windows" ]; then EXT=".exe"; fi
+          SOFT=""
+          if [ "${GOMIPS:-}" = "softfloat" ]; then SOFT="_softfloat"; fi
+          if [ "$GOOS" = "android" ]; then
+            ANDROID_API=21
+            TOOLCHAIN_BIN="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            export CC="$TOOLCHAIN_BIN/aarch64-linux-android${ANDROID_API}-clang"
+            echo "CC=${CC}" >> "$GITHUB_ENV"
+          fi
+
+          echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=${BUILD_DATE}"       >> "$GITHUB_ENV"
+          echo "COMMIT_SHA1=${COMMIT_SHA1}"     >> "$GITHUB_ENV"
+          echo "ARM_SUFFIX=${ARM_SUFFIX}"       >> "$GITHUB_ENV"
+          echo "PLATFORM=${PLATFORM}"           >> "$GITHUB_ENV"
+          echo "EXT=${EXT}"                     >> "$GITHUB_ENV"
+          echo "SOFT=${SOFT}"                   >> "$GITHUB_ENV"
+
+      - name: Get project dependencies
+        run: go mod download
+
+      - name: Install UPX (selected Linux targets)
+        if: >
+          matrix.goos == 'linux' && (
+            matrix.goarch == 'amd64' ||
+            matrix.goarch == '386'   ||
+            matrix.goarch == 'arm64' ||
+            (matrix.goarch == 'arm' && matrix.goarm == '7')
+          )
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y upx
+
+      - name: Build all flavors
+        run: |
+          mkdir -p dist
+          LD_BASE="-X github.com/nxtrace/NTrace-core/config.Version=${BUILD_VERSION} \
+                   -X github.com/nxtrace/NTrace-core/config.BuildDate=${BUILD_DATE} \
+                   -X github.com/nxtrace/NTrace-core/config.CommitID=${COMMIT_SHA1} \
+                   -w -s"
+          for SPEC in "nexttrace:" "nexttrace-tiny:flavor_tiny" "ntr:flavor_ntr"; do
+            BIN="${SPEC%%:*}"
+            TAGS="${SPEC#*:}"
+            NAME="${BIN}_${PLATFORM}${EXT}${SOFT}"
+            BUILD_ARGS=(-trimpath)
+            if [ -n "$TAGS" ]; then BUILD_ARGS+=( -tags "$TAGS" ); fi
+            BUILD_ARGS+=( -o "dist/${NAME}" -ldflags "$LD_BASE" )
+            echo "build => dist/${NAME}  (tags: ${TAGS:-none})"
+            go build "${BUILD_ARGS[@]}"
+          done
+
+      - name: Verify tiny/ntr decoupling
+        run: |
+          set -Eeuo pipefail
+          for TAGS in "flavor_tiny" "flavor_ntr"; do
+            DEPS="$(go list -deps -tags "${TAGS}" .)"
+            if grep -qE '^github\.com/natesales/q($|/)' <<<"${DEPS}"; then
+              echo "FAIL: ${TAGS} compile dependency graph contains q"
+              exit 1
+            fi
+          done
+          for BIN in "nexttrace-tiny" "ntr"; do
+            FNAME="${BIN}_${PLATFORM}${EXT}${SOFT}"
+            if ! BUILD_INFO="$(go version -m "dist/${FNAME}" 2>&1)"; then
+              echo "FAIL: unable to read Go build info from ${FNAME}"
+              echo "${BUILD_INFO}"
+              exit 1
+            fi
+            if grep -qE 'github\.com/gin-gonic/gin|github\.com/jsdelivr/globalping-cli|github\.com/natesales/q' <<<"${BUILD_INFO}"; then
+              echo "FAIL: ${FNAME} contains gin, globalping-cli, or q dependency"
+              exit 1
+            fi
+          done
+          echo "Decoupling check passed"
+
+      - name: Compress selected Linux artifacts
+        if: >
+          matrix.goos == 'linux' && (
+            matrix.goarch == 'amd64' ||
+            matrix.goarch == '386'   ||
+            matrix.goarch == 'arm64' ||
+            (matrix.goarch == 'arm' && matrix.goarm == '7')
+          )
+        run: |
+          set -Eeuo pipefail
+          for BIN in "nexttrace" "nexttrace-tiny" "ntr"; do
+            FNAME="${BIN}_${PLATFORM}${EXT}${SOFT}"
+            upx -9 "dist/${FNAME}"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('-v{0}', matrix.goarm) || '' }}${{ matrix.gomips && format('-{0}', matrix.gomips) || '' }}
+          path: dist/
+          if-no-files-found: error
+
+  build-darwin:
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix: { goarch: [ amd64, arm64 ] }
+    env:
+      CGO_ENABLED: 1
+      GOOS: darwin
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - name: Checkout codebase
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Set up Go (built-in cache)
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26.5'
+          check-latest: true
+          cache: true
+
+      - name: Show Go toolchain info
+        run: |
+          set -Eeuo pipefail
+          go version && go env && echo "Supported targets (dist list):" && go tool dist list | sort -u
+
+      - name: Sanity check (Xcode/SDK/lipo/pcap)
+        run: |
+          set -Eeuo pipefail
+          xcode-select -p
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          echo "$SDKROOT"
+          clang --version || true
+          xcrun -f lipo
+          command -v lipo >/dev/null || (echo "lipo not found"; exit 1)
+          test -f "$SDKROOT/usr/include/pcap/pcap.h" || (echo "pcap headers not found in SDK"; exit 1)
+
+      - name: Resolve build metadata + Darwin CGO flags
+        run: |
+          set -Eeuo pipefail
+          SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
+          if [ "${GOARCH}" = "amd64" ]; then ARCH_FLAG="-arch x86_64"; else ARCH_FLAG="-arch arm64"; fi
+          CC="$(xcrun -f clang)";  CXX="$(xcrun -f clang++)"
+          echo "CC=${CC}"   >> "$GITHUB_ENV"
+          echo "CXX=${CXX}" >> "$GITHUB_ENV"
+          echo "CGO_CFLAGS=-isysroot ${SDKROOT} ${ARCH_FLAG} -mmacosx-version-min=11.0"  >> "$GITHUB_ENV"
+          echo "CGO_LDFLAGS=-isysroot ${SDKROOT} ${ARCH_FLAG} -mmacosx-version-min=11.0" >> "$GITHUB_ENV"
+
+          BUILD_VERSION="$(git describe --tags --always 2>/dev/null || echo dev)"
+          BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          COMMIT_SHA1="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+          echo "BUILD_VERSION=${BUILD_VERSION}" >> "$GITHUB_ENV"
+          echo "BUILD_DATE=${BUILD_DATE}"       >> "$GITHUB_ENV"
+          echo "COMMIT_SHA1=${COMMIT_SHA1}"     >> "$GITHUB_ENV"
+
+      - name: Get project dependencies
+        run: go mod download
+
+      - name: Build all flavors (Darwin, CGO+libpcap via SDK)
+        run: |
+          mkdir -p dist
+          LD_BASE="-X github.com/nxtrace/NTrace-core/config.Version=${BUILD_VERSION} \
+                   -X github.com/nxtrace/NTrace-core/config.BuildDate=${BUILD_DATE} \
+                   -X github.com/nxtrace/NTrace-core/config.CommitID=${COMMIT_SHA1} \
+                   -w -s"
+          for SPEC in "nexttrace:" "nexttrace-tiny:flavor_tiny" "ntr:flavor_ntr"; do
+            BIN="${SPEC%%:*}"
+            TAGS="${SPEC#*:}"
+            NAME="${BIN}_${GOOS}_${GOARCH}"
+            BUILD_ARGS=(-trimpath)
+            if [ -n "$TAGS" ]; then BUILD_ARGS+=( -tags "$TAGS" ); fi
+            BUILD_ARGS+=( -o "dist/${NAME}" -ldflags "$LD_BASE" )
+            echo "build => dist/${NAME}  (tags: ${TAGS:-none})"
+            go build "${BUILD_ARGS[@]}"
+          done
+
+      - name: Verify tiny/ntr decoupling
+        run: |
+          set -Eeuo pipefail
+          for TAGS in "flavor_tiny" "flavor_ntr"; do
+            DEPS="$(go list -deps -tags "${TAGS}" .)"
+            if grep -qE '^github\.com/natesales/q($|/)' <<<"${DEPS}"; then
+              echo "FAIL: ${TAGS} compile dependency graph contains q"
+              exit 1
+            fi
+          done
+          for BIN in "nexttrace-tiny" "ntr"; do
+            FNAME="${BIN}_${GOOS}_${GOARCH}"
+            if ! BUILD_INFO="$(go version -m "dist/${FNAME}" 2>&1)"; then
+              echo "FAIL: unable to read Go build info from ${FNAME}"
+              echo "${BUILD_INFO}"
+              exit 1
+            fi
+            if grep -qE 'github\.com/gin-gonic/gin|github\.com/jsdelivr/globalping-cli|github\.com/natesales/q' <<<"${BUILD_INFO}"; then
+              echo "FAIL: ${FNAME} contains gin, globalping-cli, or q dependency"
+              exit 1
+            fi
+          done
+          echo "Decoupling check passed"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-darwin-${{ matrix.goarch }}
+          path: dist/
+          if-no-files-found: error
+
+  # Build Universal binaries for all flavors
+  darwin-universal:
+    runs-on: macos-latest
+    needs: [ build-darwin ]
+    steps:
+      - name: Download darwin slices (flatten)
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-darwin-*
+          merge-multiple: true
+          path: dist
+
+      - name: Make macOS Universal (amd64+arm64) for all flavors
+        run: |
+          set -Eeuo pipefail
+          for BIN in nexttrace nexttrace-tiny ntr; do
+            AMD64="dist/${BIN}_darwin_amd64"
+            ARM64="dist/${BIN}_darwin_arm64"
+            if [ -f "$AMD64" ] && [ -f "$ARM64" ]; then
+              lipo -create -output "dist/${BIN}_darwin_universal" "$AMD64" "$ARM64"
+              file "dist/${BIN}_darwin_universal" || true
+              echo "Built: dist/${BIN}_darwin_universal"
+            else
+              echo "Missing darwin slices for ${BIN}; cannot build universal." >&2
+              exit 1
+            fi
+          done
+          ls -l dist
+
+      - name: Upload universal artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-darwin-universal
+          path: |
+            dist/nexttrace_darwin_universal
+            dist/nexttrace-tiny_darwin_universal
+            dist/ntr_darwin_universal
+          if-no-files-found: error
+
+  # Download all build artifacts and publish to a single release
+  release:
+    runs-on: ubuntu-latest
+    needs: [ build, build-darwin, darwin-universal ]
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts (flatten)
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-*
+          merge-multiple: true
+          path: dist_release
+
+      - name: Show downloaded files
+        run: |
+          set -Eeuo pipefail
+          ls -lah dist_release
+          test -n "$(find dist_release -type f -print -quit)" || { echo "No artifacts found in dist_release"; exit 1; }
+
+      - name: Create GitHub Release (draft)
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          files: dist_release/*
+          token: ${{ secrets.GT_TOKEN }}
+          fail_on_unmatched_files: true

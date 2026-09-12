@@ -1,0 +1,20 @@
+{
+  "version": "2026-09-09.2",
+  "source": "https://github.com/xykt/NetQuality/blob/d5b99484d51286374d24b892c1b54235dc282148/net.sh",
+  "prefixes": [
+    {"id":"apnic-cn2-bb-v1","cidr":"59.43.0.0/16","networkAsn":4809,"name":"电信 CN2","kind":"registry-allocation","registryName":"CN2-BB","source":"https://rdap.apnic.net/ip/59.43.250.50","verified":"2026-09-09T00:00:00Z"}
+  ],
+  "networks": [
+    {"asn": 4134, "name": "电信 163"},
+    {"asn": 4809, "name": "电信 CN2"},
+    {"asn": 4837, "name": "联通 4837"},
+    {"asn": 9929, "name": "联通 9929"},
+    {"asn": 10099, "name": "联通国际 10099"},
+    {"asn": 58453, "name": "移动 CMI"},
+    {"asn": 58807, "name": "移动 CMIN2"},
+    {"asn": 9808, "name": "移动国内网络"},
+    {"asn": 23764, "name": "CTGNet"},
+    {"asn": 4538, "name": "教育网 CERNET"},
+    {"asn": 7497, "name": "科技网 CSTNET"}
+  ]
+}

@@ -1,0 +1,201 @@
+package fastTrace
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net"
+	"strings"
+
+	"github.com/fatih/color"
+
+	"github.com/nxtrace/NTrace-core/ipgeo"
+	"github.com/nxtrace/NTrace-core/trace"
+)
+
+//var pFastTracer ParamsFastTrace
+
+func (f *FastTracer) tracert_v6(location string, ispCollection ISPCollection) {
+	if _, err := fmt.Fprintf(color.Output, "%s\n", color.New(color.FgYellow, color.Bold).Sprintf("『%s %s 』", location, ispCollection.ISPName)); err != nil {
+		log.Printf("fast trace title write failed: %v", err)
+	}
+	displayPacketSize := f.ParamsFastTrace.PktSize
+	if !f.ParamsFastTrace.PacketSizeSet {
+		displayPacketSize = trace.DefaultPacketSize(f.TracerouteMethod, net.ParseIP(ispCollection.IPv6))
+	}
+	fmt.Printf("traceroute to %s, %d hops max, %s, %s mode\n", ispCollection.IPv6, f.ParamsFastTrace.MaxHops, trace.FormatPacketSizeLabel(displayPacketSize), strings.ToUpper(string(f.TracerouteMethod)))
+
+	ip, err := fastTraceDomainLookupFn(f.ParamsFastTrace.Context, ispCollection.IPv6, "6", f.ParamsFastTrace.Dot, true)
+	if shouldStopFastTrace(err) {
+		return
+	}
+	packetSize := f.ParamsFastTrace.PktSize
+	if !f.ParamsFastTrace.PacketSizeSet {
+		packetSize = trace.DefaultPacketSize(f.TracerouteMethod, ip)
+	}
+	packetSizeSpec, err := trace.NormalizePacketSize(f.TracerouteMethod, ip, packetSize)
+	if shouldStopFastTrace(err) {
+		return
+	}
+	var conf = trace.Config{
+		Context:          f.ParamsFastTrace.Context,
+		OSType:           f.ParamsFastTrace.OSType,
+		ICMPMode:         f.ParamsFastTrace.ICMPMode,
+		BeginHop:         f.ParamsFastTrace.BeginHop,
+		DstIP:            ip,
+		DstPort:          f.ParamsFastTrace.DstPort,
+		MaxHops:          f.ParamsFastTrace.MaxHops,
+		NumMeasurements:  3,
+		MaxAttempts:      f.ParamsFastTrace.MaxAttempts,
+		ParallelRequests: 18,
+		RDNS:             f.ParamsFastTrace.RDNS,
+		AlwaysWaitRDNS:   f.ParamsFastTrace.AlwaysWaitRDNS,
+		PacketInterval:   100,
+		TTLInterval:      500,
+		IPGeoSource:      ipgeo.GetSource(ipgeo.NextTraceAPIProvider),
+		Timeout:          f.ParamsFastTrace.Timeout,
+		SrcAddr:          f.ParamsFastTrace.SrcAddr,
+		SourceDevice:     f.ParamsFastTrace.SrcDev,
+		PktSize:          packetSizeSpec.PayloadSize,
+		RandomPacketSize: packetSizeSpec.Random,
+		TOS:              f.ParamsFastTrace.TOS,
+		Lang:             f.ParamsFastTrace.Lang,
+	}
+	conf, err = normalizeFastTraceConfig(f.TracerouteMethod, conf)
+	if shouldStopFastTrace(err) {
+		return
+	}
+
+	header := fmt.Sprintf("『%s %s 』\ntraceroute to %s, %d hops max, %s, %s mode\n",
+		location, ispCollection.ISPName, ispCollection.IPv6, f.ParamsFastTrace.MaxHops, trace.FormatPacketSizeLabel(displayPacketSize), strings.ToUpper(string(f.TracerouteMethod)))
+	outputPlan, err := configureFastTraceRealtimePrinter(&conf, f.ParamsFastTrace.OutputPath, header)
+	if err != nil {
+		return
+	}
+	defer func() {
+		if closeErr := outputPlan.close(); closeErr != nil {
+			log.Println(closeErr)
+		}
+	}()
+
+	if !runFastTraceOnce(f.TracerouteMethod, conf, outputPlan) {
+		return
+	}
+
+	fmt.Println()
+}
+
+func (f *FastTracer) testAll_v6() {
+	f.testCT_v6()
+	println()
+	f.testCU_v6()
+	println()
+	f.testCM_v6()
+	println()
+	f.testEDU_v6()
+}
+
+func (f *FastTracer) testCT_v6() {
+	f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.CT163)
+	f.tracert_v6(TestIPsCollection.Shanghai.Location, TestIPsCollection.Shanghai.CT163)
+	f.tracert_v6(TestIPsCollection.Hangzhou.Location, TestIPsCollection.Hangzhou.CT163)
+	f.tracert_v6(TestIPsCollection.Guangzhou.Location, TestIPsCollection.Guangzhou.CT163)
+}
+
+func (f *FastTracer) testCU_v6() {
+	f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.CU169)
+	f.tracert_v6(TestIPsCollection.Shanghai.Location, TestIPsCollection.Shanghai.CU169)
+	f.tracert_v6(TestIPsCollection.Shanghai.Location, TestIPsCollection.Shanghai.CU9929)
+	f.tracert_v6(TestIPsCollection.Hangzhou.Location, TestIPsCollection.Hangzhou.CU169)
+	f.tracert_v6(TestIPsCollection.Guangzhou.Location, TestIPsCollection.Guangzhou.CU169)
+}
+
+func (f *FastTracer) testCM_v6() {
+	f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.CM)
+	f.tracert_v6(TestIPsCollection.Shanghai.Location, TestIPsCollection.Shanghai.CM)
+	f.tracert_v6(TestIPsCollection.Hangzhou.Location, TestIPsCollection.Hangzhou.CM)
+	f.tracert_v6(TestIPsCollection.Guangzhou.Location, TestIPsCollection.Guangzhou.CM)
+}
+
+func (f *FastTracer) testEDU_v6() {
+	f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.EDU)
+	f.tracert_v6(TestIPsCollection.Shanghai.Location, TestIPsCollection.Shanghai.EDU)
+	f.tracert_v6(TestIPsCollection.Hangzhou.Location, TestIPsCollection.Hangzhou.EDU)
+	f.tracert_v6(TestIPsCollection.Hefei.Location, TestIPsCollection.Hefei.EDU)
+	f.tracert_v6(TestIPsCollection.Guangzhou.Location, TestIPsCollection.Guangzhou.EDU)
+	// 科技网暂时算在EDU里面，等拿到了足够多的数据再分离出去，单独用于测试
+	f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.CST)
+}
+
+func (f *FastTracer) testFastBJ_v6() {
+	f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.CT163)
+	f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.CU169)
+	f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.CM)
+	//f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.EDU)
+	//f.tracert_v6(TestIPsCollection.Beijing.Location, TestIPsCollection.Beijing.CST)
+}
+
+func (f *FastTracer) testFastSH_v6() {
+	f.tracert_v6(TestIPsCollection.Shanghai.Location, TestIPsCollection.Shanghai.CT163)
+	f.tracert_v6(TestIPsCollection.Shanghai.Location, TestIPsCollection.Shanghai.CU169)
+	f.tracert_v6(TestIPsCollection.Shanghai.Location, TestIPsCollection.Shanghai.CM)
+}
+
+func (f *FastTracer) testFastGZ_v6() {
+	f.tracert_v6(TestIPsCollection.Guangzhou.Location, TestIPsCollection.Guangzhou.CT163)
+	f.tracert_v6(TestIPsCollection.Guangzhou.Location, TestIPsCollection.Guangzhou.CU169)
+	f.tracert_v6(TestIPsCollection.Guangzhou.Location, TestIPsCollection.Guangzhou.CM)
+}
+
+func FastTestv6(traceMode trace.Method, paramsFastTrace ParamsFastTrace) {
+	choice, ok := readFastTestv6Choice(paramsFastTrace.Context)
+	if !ok {
+		return
+	}
+	ft := FastTracer{
+		ParamsFastTrace:  paramsFastTrace,
+		TracerouteMethod: fastTestMethod(traceMode),
+	}
+
+	cleanupWS := openFastTraceWSIfNeeded(paramsFastTrace)
+	defer cleanupWS()
+
+	runFastTestv6Selection(&ft, choice)
+}
+
+func readFastTestv6Choice(ctx context.Context) (string, bool) {
+	fmt.Println("您想测试哪些ISP的路由？\n1. 北京三网快速测试\n2. 上海三网快速测试\n3. 广州三网快速测试\n4. 全国电信\n5. 全国联通\n6. 全国移动\n7. 全国教育网\n8. 全国五网")
+	return promptFastTraceChoice(ctx, "请选择选项：", "1")
+}
+
+func fastTestMethod(traceMode trace.Method) trace.Method {
+	switch traceMode {
+	case trace.ICMPTrace, trace.TCPTrace, trace.UDPTrace:
+		return traceMode
+	default:
+		return trace.ICMPTrace
+	}
+}
+
+func runFastTestv6Selection(ft *FastTracer, choice string) {
+	switch choice {
+	case "1":
+		ft.testFastBJ_v6()
+	case "2":
+		ft.testFastSH_v6()
+	case "3":
+		ft.testFastGZ_v6()
+	case "4":
+		ft.testCT_v6()
+	case "5":
+		ft.testCU_v6()
+	case "6":
+		ft.testCM_v6()
+	case "7":
+		ft.testEDU_v6()
+	case "8":
+		ft.testAll_v6()
+	default:
+		ft.testFastBJ_v6()
+	}
+}

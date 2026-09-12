@@ -1,0 +1,30 @@
+PASS: 1/3 already identifies a hop and is not retried to inflate its response rate
+PASS: initial probes are paced across both queries and TTL boundaries
+PASS: paced probes retain send times and leave no calls in flight
+PASS: a wholly silent TTL gets at most ten total actual attempts, including three initial attempts
+PASS: supplemental measurements append without replacing original timeouts
+PASS: discovery completes first, then silent TTLs receive retries in round-robin order
+PASS: each TTL stops supplementing immediately after its first response
+PASS: supplemental pacing also applies between different silent TTLs
+PASS: local errors stop discovery without starting a timeout retry storm
+PASS: explicit unreachable replies are not treated as silent nodes
+PASS: supplemental local errors are retained and stop further retries
+PASS: a target discovered during supplementation retains the initial reachability observation
+PASS: the combined discovery and retry work obeys the original one-second total deadline
+PASS: last native call receives the remaining budget rather than a fresh full timeout
+PASS: the separate supplemental deadline applies even with ample total budget
+PASS: budget-truncated initial queries do not fabricate unsent attempts or timeouts
+PASS: cancellation during initial pacing drains the native call before returning
+PASS: cancellation during supplemental work drains the in-flight call and creates no later probes
+PASS: partial-response title matches the requested compact wording
+PASS: all-silent title has the real timeout count with no duplicated placeholder words
+PASS: combined title distinguishes initial and supplemental numerators and denominators
+PASS: local errors remain visible without being counted as timeouts
+PASS: historical and paced policies are not compared as a route change
+PASS: supplemental discoveries cannot introduce a false route-change candidate
+PASS: SQLite JSON roundtrip preserves pacing policy, phases, timestamps, and every original result
+PASS: legacy observations retain unknown policy and are not reinterpreted as supplemental probes
+PASS: diagnostic export includes supplemental provenance
+PASS: configuration rejects more than ten total attempts per TTL
+Route retry fixtures: D:\Users\CHENLI~1\AppData\Local\Temp\IpQuality-route-retries-788db483917b4120afbc979558e5a833
+ALL 28 ROUTE CHECKS PASSED.

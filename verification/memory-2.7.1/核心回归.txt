@@ -1,0 +1,288 @@
+  TcpLatencyMonitor.Core -> D:\Users\chenlinfeng\Documents\Codex\2026-09-09\https-github-com-ibsgss-tcpquality-https\work\IpQualityMonitor\src\TcpLatencyMonitor.Core\bin\Release\net10.0\TcpLatencyMonitor.Core.dll
+  TcpLatencyMonitor.Tests -> D:\Users\chenlinfeng\Documents\Codex\2026-09-09\https-github-com-ibsgss-tcpquality-https\work\IpQualityMonitor\tests\TcpLatencyMonitor.Tests\bin\Release\net10.0\TcpLatencyMonitor.Tests.dll
+
+已成功生成。
+    0 个警告
+    0 个错误
+
+已用时间 00:00:00.64
+PASS: canonical IPv6
+PASS: IPv4-mapped identity
+PASS: reject URL
+PASS: reject shorthand IPv4
+PASS: reject invalid number
+PASS: reject fractional port
+PASS: reject unspecified address
+PASS: reject IPv4-mapped unspecified address
+PASS: classify refusal
+PASS: classify timeout
+PASS: classify local permission error
+PASS: connection reset counts as attempt
+PASS: real loopback TCP success
+Closed loopback observation: Refused / ConnectionRefused
+PASS: real closed port records refusal or filtered timeout without latency
+PASS: user cancellation does not create failed sample
+PASS: empty history has no fabricated zero
+PASS: exclude local errors, other targets and future samples
+PASS: failures do not dilute successful latency
+PASS: nearest-rank P95
+PASS: exact minute boundary includes newest sample
+PASS: history newest first
+PASS: history survives restart
+PASS: CSV export preserves errors, nulls and quoting
+PASS: retention cleanup preserves recent history
+PASS: slow probes never overlap or produce catch-up burst
+PASS: stopping in-flight probe does not record failure
+PASS: stale in-flight result after suspension is not recorded
+PASS: ICMP does not require a TCP port or share its history
+PASS: timeout parameters isolate measurement series
+PASS: TTL expiry is not endpoint success
+PASS: native Windows ICMP loopback includes valid zero RTT
+PASS: native endpoint ICMP keeps handle growth bounded (286 to 288)
+PASS: native route reply layout 127.0.0.1
+PASS: native route reply layout ::1
+PASS: route query budget and in-flight bound
+PASS: cancel route drains in-flight probes before returning
+PASS: path change requires confirmation
+PASS: missing hop is visibility change, not route change
+PASS: network environments do not compare as remote route changes
+PASS: overlapping ECMP node sets do not trigger change
+PASS: inserted hop aligns common nodes
+PASS: initial blocked ICMP is unverified, not repeated offline alerts
+PASS: three failures create one incident
+PASS: recovery requires three successes
+PASS: persistent latency detects once against stable baseline
+PASS: latency recovery has hysteresis
+PASS: unobserved gap resets incident state
+PASS: legacy migration creates backup, preserves data, and is repeatable
+PASS: legacy data remains separate from new ICMP profile
+PASS: route JSON roundtrip preserves all hops
+PASS: route lookup cannot cross target identity
+PASS: diagnostic ZIP contains samples, routes, events and profile
+PASS: 31-day aggregate agrees with raw SQL (111 ms dashboard)
+PASS: power suspension produces no samples
+PASS: resume records gap and restarts sampling
+PASS: coordinator stop drains records and ends sampling
+V2 test artifacts: D:\Users\CHENLI~1\AppData\Local\Temp\IpQuality-v2-af7ddfdd80924a3690151be86f0cfdbb
+PASS: 1/3 already identifies a hop and is not retried to inflate its response rate
+PASS: initial probes are paced across both queries and TTL boundaries
+PASS: paced probes retain send times and leave no calls in flight
+PASS: a wholly silent TTL gets at most ten total actual attempts, including three initial attempts
+PASS: supplemental measurements append without replacing original timeouts
+PASS: discovery completes first, then silent TTLs receive retries in round-robin order
+PASS: each TTL stops supplementing immediately after its first response
+PASS: supplemental pacing also applies between different silent TTLs
+PASS: local errors stop discovery without starting a timeout retry storm
+PASS: explicit unreachable replies are not treated as silent nodes
+PASS: supplemental local errors are retained and stop further retries
+PASS: a target discovered during supplementation retains the initial reachability observation
+PASS: the combined discovery and retry work obeys the original one-second total deadline
+PASS: last native call receives the remaining budget rather than a fresh full timeout
+PASS: the separate supplemental deadline applies even with ample total budget
+PASS: budget-truncated initial queries do not fabricate unsent attempts or timeouts
+PASS: cancellation during initial pacing drains the native call before returning
+PASS: cancellation during supplemental work drains the in-flight call and creates no later probes
+PASS: partial-response title matches the requested compact wording
+PASS: all-silent title has the real timeout count with no duplicated placeholder words
+PASS: combined title distinguishes initial and supplemental numerators and denominators
+PASS: local errors remain visible without being counted as timeouts
+PASS: historical and paced policies are not compared as a route change
+PASS: supplemental discoveries cannot introduce a false route-change candidate
+PASS: SQLite JSON roundtrip preserves pacing policy, phases, timestamps, and every original result
+PASS: legacy observations retain unknown policy and are not reinterpreted as supplemental probes
+PASS: diagnostic export includes supplemental provenance
+PASS: configuration rejects more than ten total attempts per TTL
+Route retry fixtures: D:\Users\CHENLI~1\AppData\Local\Temp\IpQuality-route-retries-b7231fc969ab41208eac286801dc3811
+PASS: renaming preserves profile and measurement identities
+PASS: same IP can retain distinct TCP ports and old configuration history
+PASS: normalized IP aliases share measurement identity
+PASS: shared writer commits every concurrent sample before acknowledgment
+PASS: writer supports batched commits across concurrent producers
+PASS: metadata request reservations share the same transactional writer
+PASS: multi-target statistics use one database snapshot and one cutoff
+PASS: comparison lines and hourly grid use equal sample counts
+PASS: hour P95 uses raw successful samples and leaves empty histories blank
+PASS: no history is not converted into zero latency or healthy availability
+PASS: disabled comparison protocol is represented as unavailable, not failed
+PASS: one maintenance pass bounds raw history deletion to 2000 rows
+PASS: chunked retention preserves the 31-day policy
+PASS: each queued annotation receives its own execution budget and retains its local explanation
+PASS: ICMP and TCP route requests coalesce while retaining the caller's history key
+PASS: cancelling one route subscriber leaves another subscriber's task alive
+PASS: periodic route work is served after at most three urgent jobs
+PASS: cancelled queued routes do not send probes
+PASS: queued routes recheck the network context before sending any probes
+PASS: an individual probe exception does not stop unrelated targets or the shared writer
+PASS: 20 dual-protocol timeout targets run with bounded global concurrency
+PASS: pausing one target leaves nineteen others sampling
+PASS: suspension creates no fabricated timeout records
+PASS: sampling resumes after a power transition
+PASS: stop-all drains every in-flight probe before returning
+PASS: all twenty targets retain independently queryable history
+PASS: identical measurements use reference-counted ownership
+PASS: incompatible sampling parameters cannot silently overwrite a shared series
+PASS: local concurrency exhaustion records gaps without inventing remote failures
+PASS: storage failure is global and stops every producer without deadlock
+PASS: failed transactions do not acknowledge or display uncommitted samples
+Multi-target fixtures: D:\Users\CHENLI~1\AppData\Local\Temp\IpQuality-multi-d227088bf3de4d7eba93c310745b1f07
+PASS: metadata ASN/operator/region parsing and one-day TTL
+PASS: missing metadata fields remain unknown
+PASS: metadata rejects a response for another IP
+PASS: nonpublic IPv4/IPv6 nodes never need online lookup
+PASS: disabled lookup and private nodes send zero HTTP requests
+PASS: concurrent duplicate nodes use one online request
+PASS: cached annotations remain available with online lookup disabled
+PASS: annotation cache and source survive restart and schema initialization
+PASS: expired annotations refresh only with network opt-in
+PASS: malformed service response is contained, cached and backed off
+PASS: HTTP 429 Retry-After persists and blocks other nodes across client restart
+PASS: persistent rolling 24-hour query budget expires correctly
+PASS: cancelled online query does not create a negative cache entry
+PASS: diagnostic export streams all routes and events beyond former page limits
+PASS: diagnostic export contains relevant cached annotations with provenance
+PASS: 1-day timeline agrees with raw samples and excludes future/other-target data
+PASS: 1-day chart and hour grid share exact counts and boundaries
+PASS: 1-day timeline uses bounded display resolution
+PASS: 7-day timeline agrees with raw samples and excludes future/other-target data
+PASS: 7-day chart and hour grid share exact counts and boundaries
+PASS: 7-day timeline uses bounded display resolution
+PASS: hour grid aligns to local clock hours including fractional UTC offsets
+PASS: unobserved periods remain empty rather than zero latency
+PASS: embedded catalog maps requested network names
+PASS: catalog avoids unsupported CMI/GIA and unknown-ASN labels
+PASS: multi-response TTLs and unknown hops preserve ambiguity in route summary
+PASS: CN2 observations do not certify a GIA/GT product
+PASS: target ASN alone is not presented as transit-network evidence
+PASS: new cache values do not rewrite historical annotation evidence
+PASS: original and supplementary route interpretations remain independently retrievable
+PASS: automatic offline annotations never perform HTTP
+PASS: view-only setting never queries in background
+PASS: background enrichment shares a client, cache and duplicate jobs
+PASS: diagnostic export preserves annotation revisions and rule provenance
+PASS: annotation retention follows its original route
+PASS: stop cancels active enrichment and queued jobs cannot restart online queries
+PASS: v3 upgrade preserves samples and routes and remains repeatable
+PASS: CN2 prefix records its registry source and range
+PASS: CN2 CIDR includes both supplied IPs and respects boundaries
+PASS: mapped IPv4 matches while IPv6 cannot match an IPv4 prefix
+PASS: longest prefix wins independently of file order
+PASS: invalid masks, host bits and duplicate prefix evidence are rejected
+PASS: IPv6 CIDR handles partial-byte masks and address families
+PASS: no metadata still yields CN2 without inventing ASN
+PASS: valid cache with missing ASN supports overview and does not need a repeated query
+PASS: adjacent equal city/network nodes collapse but retain node evidence
+PASS: city changes remain visible inside the same network
+PASS: network changes remain visible inside the same city
+PASS: returning to a previous city is not globally deduplicated
+PASS: multiple cities at one TTL remain alternatives
+PASS: same-label multiple responses retain their ambiguity
+PASS: unresponsive TTLs retain their position and break city merging
+PASS: unrecorded TTLs remain distinct from probes with no reply
+PASS: missing location is not inherited or merged through
+PASS: city display is independent of ASN and network recognition
+PASS: province and country fallbacks explicitly retain their granularity
+PASS: homonymous cities in different regions are disambiguated
+PASS: expired location is marked without modifying original query timestamps
+PASS: conflicting known ASN and prefix evidence stays explicit and unchanged
+PASS: conflict alone cannot assert a confirmed transit backbone
+PASS: matching ASN and prefix retain both independent evidence sources
+PASS: unknown catalog ASN is retained alongside registry attribution
+PASS: prefix-only endpoint is separate from transit evidence
+PASS: unobserved destination geography is not appended to the measured sequence
+PASS: registry attribution never certifies GIA or GT
+PASS: 2.1 JSON is reinterpreted offline using frozen historical geography
+PASS: first annotation remains readable with absent new fields
+PASS: reopening or recomputing identical evidence does not create another revision
+PASS: changed city evidence creates a revision while retaining the original
+PASS: diagnostic export includes prefix provenance and frozen city sequence
+PASS: offline service classifies prefix routes without HTTP
+PASS: local prefix result is saved before a slow lookup completes
+PASS: cancellation ends enrichment without starting another lookup
+PASS: DC versus California degrades to common country with both sources preserved
+PASS: San Jose and Fremont remain distinct cities within common California
+PASS: English and Chinese aliases normalize to one city identity
+PASS: country-only data does not count as a second city confirmation
+PASS: different city names remain a conflict even when one province field is missing
+PASS: Chinese province codes and English city aliases normalize consistently
+PASS: expired secondary data cannot overrule a fresh city
+PASS: last successful expired location remains visibly stale
+PASS: different countries never merge same-named cities
+PASS: city conflict does not invalidate a consistent ASN
+PASS: different current ASNs retain an explicit network conflict
+PASS: manual city selection preserves conflicting source evidence
+PASS: expired calibration falls back to unresolved source disagreement
+PASS: IPinfo Core city schema and string ASN parsed independently
+PASS: IPinfo Lite cannot masquerade as the city provider
+PASS: IPinfo rejects another IP's response
+PASS: NextTrace address objects and nanosecond RTT imported correctly
+PASS: private nodes and timeout probes remain outside city adoption
+PASS: import does not invent measurement time and preserves provenance
+PASS: malformed and unsupported JSON shapes fail before persistence
+PASS: import is bounded at two megabytes
+PASS: import rejects a Geo IP inconsistent with the hop responder
+PASS: old JSON missing every new field restores safe defaults through production deserialization
+PASS: legacy JSON renders location and metadata without a null reference
+PASS: legacy metadata can be promoted into the provider cache
+PASS: each provider owns an independent successful observation
+PASS: combined cache preserves multiple provider evidence
+PASS: failed attempt preserves last success and records separate error state
+PASS: provider cooldowns are isolated
+PASS: saving credentials can reset failed authentication without erasing successful data
+PASS: single-IP calibration is persistent and reversible
+PASS: calibration does not expand into neighbouring IPs
+PASS: undo restores provider evidence instead of deleting annotations
+PASS: invalid calibration is rejected before entering the writer
+PASS: editing global metadata leaves the original route snapshot frozen until explicit reinterpretation
+PASS: explicit reinterpretation adds a revision and retains earliest evidence
+PASS: import history never creates monitor samples or replaces route runs
+PASS: adjacent conflicted locations never collapse into one overview row
+PASS: network outage retains an expired successful city
+PASS: IPinfo credential travels in auth header only
+PASS: multiple targets share exactly one request per provider for a new node
+PASS: double-source lookup reaches conflict resolution
+PASS: offline view never refreshes either provider
+PASS: retention preserves still-valid long-lived manual calibration
+PASS: manual-only evidence never invents an online provider lookup
+PASS: v4 migration imports existing observations once and preserves values
+PASS: v4 uses the official endpoint and header, not a credential URL
+PASS: concurrent targets share one v4 result and never start PoW on v4 success
+PASS: NextTrace successful results default to a 24-hour database cache
+PASS: actual token expiry is learned from the service header
+PASS: changing transport or restarting the client reuses the shared database cache
+PASS: HTTP 401 falls back to PoW and avoids retrying v4 for every IP
+PASS: HTTP 403 falls back to PoW and avoids retrying v4 for every IP
+PASS: HTTP 503 falls back to PoW and avoids retrying v4 for every IP
+PASS: 429 applies a service cooldown instead of evading it through PoW
+PASS: known expired token skips v4 for new nodes
+PASS: only new or expired nodes seen within 24 hours are due; dormant, fresh and private nodes are excluded
+PASS: daily background refresh is idempotent and does not requery fresh active IPs
+PASS: failed refresh preserves the previous success and marks its stale/error state
+PASS: NextTrace provides the displayed city while alternate source evidence remains available
+PASS: Hong Kong region and missing ASN are retained without inventing a city or GIA classification
+PASS: v4 rejects a response for a different IP
+PASS: overview hides private hops and merges only adjacent same-city same-network nodes
+PASS: merged RTT spans per-hop means and timeouts do not dilute averages
+PASS: merged rows retain IPs, sample counts and individual probe evidence
+PASS: endpoint stays separate and zero-millisecond native timing is displayed as less than one
+PASS: show-all restores private rows with accurate private-address wording
+PASS: filtering an unresponsive hop cannot create artificial adjacency
+PASS: unresponsive rows have no fabricated zero RTT
+PASS: filtering a private hop cannot merge through it
+PASS: a city change splits otherwise matching backbone rows
+PASS: a network change splits same-city rows
+PASS: unknown city is not evidence of a shared city
+PASS: matching province-only geography is not collapsed as matching cities
+PASS: same-named cities in different countries do not merge
+PASS: multiple IPs at one TTL stay on separate rows and block cross-TTL merging
+PASS: a hidden private alternative still preserves multipath ambiguity
+PASS: one IP repeated across merged hops is shown once while preserving hop range
+PASS: target echo reply is never merged with an intermediate TTL-expiry response
+PASS: private-address target remains visible under the default filter
+PASS: explicit diagnostic errors remain visible and do not supply successful RTT
+PASS: invalid numeric RTT values cannot corrupt a node mean
+PASS: merged range flags nodes with no valid RTT instead of silently treating them as zero
+PASS: unrecorded TTL is distinct from a probe timeout
+PASS: fully filtered route retains an explanation count
+PASS: overview retains every filtered row in hop order including the target
+PASS: table cannot mix a route with another route's annotation
+ALL 275 CHECKS PASSED. Test data: D:\Users\CHENLI~1\AppData\Local\Temp\TcpLatencyMonitor-tests-7657b0065d83401292125a43bd774d69

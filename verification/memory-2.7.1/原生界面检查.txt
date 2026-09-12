@@ -1,0 +1,103 @@
+PASS new installation enables both annotation options without auto-starting a target
+PASS missing flags in old settings preserve offline mode and other user settings
+PASS existing view-only preference is not expanded to background queries
+PASS disabled parent annotation switch overrides an inconsistent background flag
+PASS existing automatic annotation preference remains enabled
+PASS unreadable existing settings fail back to offline mode instead of new-install defaults
+PASS an unreadable configuration is never overwritten by automatic saves
+PASS flat settings migrate into the first stable profile without changing its measurement configuration
+PASS newer settings versions remain intact and are rejected explicitly
+PASS automatic annotation settings persist and provider disclosure remains in annotation settings
+PASS disabling online annotations clears and disables background queries
+PASS start and live samples
+PASS both protocols sampled independently
+PASS switch to TCP statistics
+PASS switch back to ICMP statistics
+PASS hidden window continues sampling
+PASS stop cancels further samples and unlocks settings
+PASS restart after stop
+PASS export saved history
+PASS native route history persisted
+PASS native tray initialized
+PASS diagnostic bundle export in NativeAOT app
+PASS existing offline settings remain off after upgrade
+PASS NativeAOT cache renders ASN/operator/location/source without HTTP
+PASS local route nodes receive an offline annotation
+PASS online annotation preference persists
+PASS 24-hour selector controls shared chart and heatmap data
+PASS seven-day selector renders date/hour matrix and matching chart
+PASS hour cells switch between latency and failure rate
+PASS overview displays classified route summary without opening history
+PASS overview aligns IP, city, network and RTT in five columns
+PASS overview hides private and unresponsive rows while retaining a private target
+PASS native overview displays merged hop range and range of per-hop RTT means
+PASS expanding a merged row reveals both IPs and their individual RTTs
+PASS show-all restores filtered nodes in the overview table
+PASS overview renders all ten filtered rows with no six-row cutoff
+PASS single show-all switch exposes all twelve nodes without an additional expand step
+PASS NativeAOT details retain registry evidence, missing ASN and city
+PASS NativeAOT reinterprets a legacy snapshot offline and retains its first annotation
+PASS earliest legacy view preserves its content without invented new counters
+PASS rendered graph and heatmap retain matching sample counts
+PASS native details show one response and its annotation with timeout count only in the heading
+PASS native all-silent card contains just its heading, without any placeholder rows
+PASS native retry card distinguishes supplemental response provenance and latency
+PASS native route details remove duplicated no-response labels regardless of probe ordering
+PASS native overview marks recovered nodes as supplemental and still filters silent TTLs
+PASS NativeAOT persistence retains the new policy and actual send timestamps from loopback measurement
+PASS NativeAOT reads genuine old-format metadata without leaving loading placeholders
+PASS annotation read failure clears loading placeholders and preserves displayed evidence
+PASS overview renders city conflicts without merging them
+PASS overview location cells expose clickable evidence actions
+PASS calibration dialog shows source evidence for the chosen IP
+PASS native calibration saves without replacing earliest route evidence
+PASS native undo returns the node to its unresolved source evidence
+PASS NativeAOT DPAPI token round trip succeeds
+PASS token is encrypted and absent from settings JSON
+PASS removing a token clears the encrypted file
+PASS data source dialog persists primary provider and cross-check preference
+PASS saving a data source does not enable disabled online annotations
+PASS NextTrace settings expose the official token page action
+PASS NextTrace provider and daily cache settings persist through the native dialog
+PASS NextTrace token is DPAPI encrypted and absent from exported settings
+PASS legacy NextTrace import and clipboard buttons are removed
+PASS data source dialog removes the token and returns to the base provider
+PASS NativeAOT serializes and restores independent multi-target profiles
+PASS migration retains annotation opt-outs and backs up the previous configuration
+PASS native ICMP and distinct TCP services run under multiple profiles
+PASS selecting a target does not restart or stop monitoring
+PASS native pause stops only the selected profile and keeps a shared ICMP owner alive
+PASS selected TCP statistics use the selected profile's port
+PASS native overview displays four targets with independent actions
+PASS an unstarted IPv6 target remains empty in the overview
+PASS comparison shares its cutoff across four selected targets
+PASS seven-day selection controls comparison lines and all hourly grids together
+PASS comparison hourly grids use a shared failure color scale
+PASS TCP comparison excludes disabled series without dropping their explanatory rows
+PASS rapid target and protocol switching cannot render another target's timeline
+PASS target list filters by name
+PASS NativeAOT opens the previous TCP configuration after editing a port
+PASS editing a port retains both the previous service and all earlier revisions
+PASS compact native window retains navigation and all target rows
+PASS multi-target verification leaves every monitor stopped
+PASS legacy migration uses selected policy once and preserves previous timeout history
+PASS switching targets does not replace the unified settings editor
+PASS unified settings is editable during monitoring and has its own page
+PASS saving global settings applies to all persisted targets
+PASS applying global settings restarts only previously running targets
+PASS global timeout edits preserve historical measurement revisions
+PASS new targets inherit the saved global policy
+PASS unified settings does not require any target
+PASS overview refresh reuses every row and chart instance
+PASS removed targets release row caches and actions
+PASS hidden comparison page does not paint during overview refresh
+PASS mini charts keep a bounded visual tree for hundreds of points
+PASS closed tooltip defers visual updates and opening reads latest text
+PASS switching pages renders cached data without waiting fifteen seconds
+PASS comparison refresh reuses panels and hour tiles
+PASS reused hour tiles select the new time window rather than stale captured times
+PASS hour tooltip updates text without replacing its content control
+PASS reused target button resolves the current profile after editing
+PASS geometry preserves zero RTT, gaps, mixed failures and maximum latency
+PASS chart tooltip reads original extrema and local-error counts
+PASS tray state suppresses chart rendering

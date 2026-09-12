@@ -1,0 +1,317 @@
+package cmd
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/nxtrace/NTrace-core/config"
+	"github.com/nxtrace/NTrace-core/ipgeo"
+	"github.com/nxtrace/NTrace-core/printer"
+	"github.com/nxtrace/NTrace-core/trace"
+	"github.com/nxtrace/NTrace-core/util"
+)
+
+const defaultMTRInternalTTLIntervalMs = 0
+
+// MTR 模式下与其他输出/功能标志互斥的检查。
+// 返回 true 表示存在冲突。
+func checkMTRConflicts(flags map[string]bool) (conflict string, ok bool) {
+	conflicts := []struct {
+		name string
+		set  bool
+	}{
+		{"--table", flags["table"]},
+		{"--classic", flags["classic"]},
+		{"--json", flags["json"]},
+		{"--output", flags["output"]},
+		{"--output-default", flags["outputDefault"]},
+		{"--route-path", flags["routePath"]},
+		{"--from", flags["from"]},
+		{"--fast-trace", flags["fastTrace"]},
+		{"--file", flags["file"]},
+		{"--deploy", flags["deploy"]},
+	}
+	for _, c := range conflicts {
+		if c.set {
+			return c.name, false
+		}
+	}
+	return "", true
+}
+
+// runMTRTUI 执行 MTR 交互式 TUI 模式。
+// 当 stdin 为 TTY 时启用全屏 TUI（备用屏幕、按键控制）；
+// 非 TTY 时降级为简单表格刷新。
+func runMTRTUI(method trace.Method, conf trace.Config, hopIntervalMs int, maxPerHop int, domain string, dataOrigin string, showIPs bool, initialDisplayMode int) {
+	if hopIntervalMs <= 0 {
+		hopIntervalMs = 1000
+	}
+
+	// Ctrl-C 优雅退出
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithCancel(sigCtx)
+	defer cancel()
+
+	// 初始化 TUI 控制器
+	ui := newMTRUI(cancel, initialDisplayMode)
+	ui.Enter()
+	defer ui.Leave()
+
+	// 按键读取协程（非 TTY 时内部 no-op）
+	go ui.ReadKeysLoop(ctx)
+
+	startTime := time.Now()
+	target := conf.DstIP.String()
+
+	// 解析源 IP：--source > --dev 推导 > udp dial fallback
+	srcHost, _ := os.Hostname()
+	if srcHost == "" {
+		srcHost = "unknown-host"
+	}
+	srcIP := resolveSrcIP(conf)
+
+	// 语言：默认为 "cn"
+	lang := conf.Lang
+	if lang == "" {
+		lang = "cn"
+	}
+
+	roundConf := normalizeMTRTraceConfig(conf)
+
+	opts := buildMTRInteractiveOptions(ui, hopIntervalMs, maxPerHop)
+	history := attachMTRHistoryIfTTY(ui, &opts)
+
+	// TTY 模式下使用 TUI 渲染器 + 暂停支持，非 TTY 使用简单表格
+	var onSnapshot trace.MTROnSnapshot
+	if ui.IsTTY() {
+		opts.IsPaused = ui.IsPaused
+		onSnapshot = printer.MTRTUIPrinter(target, domain, target, config.Version, startTime,
+			srcHost, srcIP, lang, func() string { return buildAPIInfo(dataOrigin) }, showIPs, ui.IsPaused,
+			ui.CurrentDisplayMode, ui.CurrentNameMode, ui.IsMPLSDisabled,
+			ui.IsHistoryMode, ui.CurrentHistoryChartMode, history.Snapshot)
+	} else {
+		onSnapshot = func(iteration int, stats []trace.MTRHopStat) {
+			printer.MTRTablePrinter(stats, iteration, ui.CurrentDisplayMode(), ui.CurrentNameMode(), lang, showIPs)
+		}
+	}
+
+	err := trace.RunMTR(ctx, method, roundConf, opts, onSnapshot)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		// 离开备用屏幕后再打印错误
+		fmt.Println(err)
+	}
+}
+
+func buildMTRInteractiveOptions(ui *mtrUI, hopIntervalMs int, maxPerHop int) trace.MTROptions {
+	opts := trace.MTROptions{
+		HopInterval: time.Duration(hopIntervalMs) * time.Millisecond,
+		MaxPerHop:   maxPerHop,
+	}
+	if ui == nil {
+		return opts
+	}
+	opts.IsResetRequested = ui.ConsumeRestartRequest
+	opts.AsyncMetadata = ui.IsTTY()
+	return opts
+}
+
+func attachMTRHistoryIfTTY(ui *mtrUI, opts *trace.MTROptions) *printer.MTRHistoryStore {
+	if ui == nil || opts == nil || !ui.IsTTY() {
+		return nil
+	}
+	history := printer.NewMTRHistoryStore(printer.MTRHistoryWindow)
+	opts.OnProbe = history.AddProbeEvent
+	if opts.IsResetRequested != nil {
+		resetRequested := opts.IsResetRequested
+		opts.IsResetRequested = func() bool {
+			if !resetRequested() {
+				return false
+			}
+			history.Reset()
+			return true
+		}
+	}
+	return history
+}
+
+// runMTRReport 执行 MTR 非全屏报告模式（对齐 mtr -rzw 风格）。
+// 探测完 maxPerHop 后一次性输出最终统计到 stdout，不进入 alternate screen。
+func runMTRReport(method trace.Method, conf trace.Config, hopIntervalMs int, maxPerHop int, domain string, dataOrigin string, wide bool, showIPs bool) {
+	if hopIntervalMs <= 0 {
+		hopIntervalMs = 1000
+	}
+	if maxPerHop <= 0 {
+		maxPerHop = 10
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	startTime := time.Now()
+
+	srcHost, _ := os.Hostname()
+	if srcHost == "" {
+		srcHost = "unknown-host"
+	}
+
+	lang := conf.Lang
+	if lang == "" {
+		lang = "cn"
+	}
+
+	// 最终快照
+	var finalStats []trace.MTRHopStat
+	onSnapshot := func(iteration int, stats []trace.MTRHopStat) {
+		finalStats = stats
+	}
+
+	opts := trace.MTROptions{
+		HopInterval: time.Duration(hopIntervalMs) * time.Millisecond,
+		MaxPerHop:   maxPerHop,
+	}
+
+	roundConf := normalizeMTRReportConfig(conf, wide)
+	err := trace.RunMTR(ctx, method, roundConf, opts, onSnapshot)
+	if err != nil && !errors.Is(err, context.Canceled) {
+		fmt.Println(err)
+		return
+	}
+
+	if len(finalStats) == 0 {
+		fmt.Println("No data collected.")
+		return
+	}
+
+	printer.MTRReportPrint(finalStats, printer.MTRReportOptions{
+		StartTime: startTime,
+		SrcHost:   srcHost,
+		Wide:      wide,
+		ShowIPs:   showIPs,
+		Lang:      lang,
+	})
+}
+
+// runMTRRaw 执行 MTR 原始流式模式（逐事件输出，'|' 分隔）。
+// 行格式固定为 12 列：
+// ttl|ip|ptr|rtt|asn|country|prov|city|district|owner|lat|lng
+func writeMTRRawPathEnd(w io.Writer, reason *trace.StopReason) error {
+	if reason == nil || reason.Reason != trace.StopReasonUnreachable {
+		return nil
+	}
+	return printer.WriteTraceStopReason(w, reason)
+}
+
+func runMTRRaw(method trace.Method, conf trace.Config, hopIntervalMs int, maxPerHop int, dataOrigin string) {
+	if hopIntervalMs <= 0 {
+		hopIntervalMs = 1000
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	opts := trace.MTRRawOptions{
+		HopInterval: time.Duration(hopIntervalMs) * time.Millisecond,
+		MaxPerHop:   maxPerHop,
+		OnPathEnd: func(reason *trace.StopReason) {
+			if err := writeMTRRawPathEnd(os.Stderr, reason); err != nil {
+				writeMTRRawRuntimeError(os.Stderr, err)
+			}
+		},
+	}
+
+	roundConf := normalizeMTRTraceConfig(conf)
+	if apiLine := buildRawAPIInfoLine(dataOrigin); apiLine != "" {
+		fmt.Println(apiLine)
+	}
+
+	err := trace.RunMTRRaw(ctx, method, roundConf, opts, func(rec trace.MTRRawRecord) {
+		fmt.Println(printer.FormatMTRRawLine(rec))
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		writeMTRRawRuntimeError(os.Stderr, err)
+	}
+}
+
+func normalizeMTRTraceConfig(conf trace.Config) trace.Config {
+	normalized := conf
+	normalized.TTLInterval = defaultMTRInternalTTLIntervalMs
+	return normalized
+}
+
+func normalizeMTRReportConfig(conf trace.Config, wide bool) trace.Config {
+	normalized := normalizeMTRTraceConfig(conf)
+	if wide {
+		return normalized
+	}
+
+	normalized.IPGeoSource = nil
+	if normalized.RDNS {
+		normalized.AlwaysWaitRDNS = true
+	}
+	return normalized
+}
+
+func writeMTRRawRuntimeError(w io.Writer, err error) {
+	if err == nil || w == nil {
+		return
+	}
+	_, _ = fmt.Fprintln(w, err)
+}
+
+// resolveSrcIP 按优先级解析源 IP：--source > --dev 推导 > udp dial fallback。
+// 保证与目标 IP 族匹配，失败时返回 "unknown"。
+func resolveSrcIP(conf trace.Config) string {
+	sourceDevice := conf.SourceDevice
+	if sourceDevice == "" {
+		sourceDevice = util.SrcDev
+	}
+	resolved, _, err := trace.ResolveConfiguredSrcAddr(conf.DstIP, conf.SrcAddr, sourceDevice)
+	if err == nil && strings.TrimSpace(resolved) != "" {
+		return resolved
+	}
+	return "unknown"
+}
+
+// buildAPIInfo 生成首行 preferred API 扩展信息（纯文本，不含 ANSI；仅 NextTrace API）。
+func buildAPIInfo(dataOrigin string) string {
+	if !ipgeo.IsNextTraceAPIProvider(dataOrigin) {
+		return ""
+	}
+	meta := util.GetFastIPMetaCache()
+	if meta.IP == "" {
+		return ""
+	}
+	nodeName := meta.NodeName
+	if nodeName == "" {
+		nodeName = "Unknown"
+	}
+	return fmt.Sprintf("preferred API IP: %s[%s]", nodeName, meta.IP)
+}
+
+func buildRawAPIInfoLine(dataOrigin string) string {
+	if !ipgeo.IsNextTraceAPIProvider(dataOrigin) {
+		return ""
+	}
+	meta := util.GetFastIPMetaCache()
+	if meta.IP == "" {
+		return ""
+	}
+
+	nodeName := strings.TrimSpace(meta.NodeName)
+	if nodeName == "" {
+		nodeName = "Unknown"
+	}
+	latency := strings.TrimSpace(meta.Latency)
+	if latency == "" {
+		return fmt.Sprintf("[NextTrace API] preferred API IP - [%s] - %s", meta.IP, nodeName)
+	}
+	return fmt.Sprintf("[NextTrace API] preferred API IP - [%s] - %sms - %s", meta.IP, latency, nodeName)
+}

@@ -1,0 +1,15 @@
+SEEDED day=1/7 rows=691200 elapsed=6.4s
+SEEDED day=2/7 rows=1382400 elapsed=13.1s
+SEEDED day=3/7 rows=2073600 elapsed=20.7s
+SEEDED day=4/7 rows=2764800 elapsed=27.6s
+SEEDED day=5/7 rows=3456000 elapsed=34.6s
+SEEDED day=6/7 rows=4147200 elapsed=41.6s
+SEEDED day=7/7 rows=4838400 elapsed=48.4s
+SEED COMPLETE rows=4838400 seconds=48.4
+OVERVIEW days=7 targets=20 milliseconds=498.5 samples=2419200
+OVERVIEW days=1 targets=20 milliseconds=84.1 samples=345680
+OVERVIEW days=7 targets=20 milliseconds=451.3 samples=2419200
+DETAIL milliseconds=51.4
+WRITE samples=40 milliseconds=17.6 batches=2
+DATABASE bytes=1186562048 working_set=59432960
+BENCHMARK PASSED · generated data only; no network traffic

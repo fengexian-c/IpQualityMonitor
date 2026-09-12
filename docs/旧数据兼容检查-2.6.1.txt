@@ -1,0 +1,1 @@
+PASS isolated legacy database: 32 metadata records and 239 routes read/reinterpreted; all 243 original annotations retained byte-for-byte; no network calls.
