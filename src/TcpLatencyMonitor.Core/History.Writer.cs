@@ -14,6 +14,9 @@ public sealed partial class History : IAsyncDisposable
     [ThreadStatic] private static History? _executingHistory;
     private SqliteConnection? _batchConnection;
     public event Action<Exception>? WriteFailed;
+    public event Action<string?,string?>? RouteSourceCommitted;
+    private readonly List<(string? Target,string? Route)> _routeSourceChanges=new();
+    private void RouteSourceChanged(string? target,string? route=null)=>_routeSourceChanges.Add((target,route));
     public Exception? WriteFailure=>Volatile.Read(ref _writeFailure);
     public long CommittedBatches {get;private set;}
     public Task RecordAsync(Action action)=>QueueWriteAsync(_=>action());
@@ -42,6 +45,7 @@ public sealed partial class History : IAsyncDisposable
             while(await _writeQueue.Reader.WaitToReadAsync().ConfigureAwait(false))
             {
                 batch.Clear();
+                _routeSourceChanges.Clear();
                 if(_writeQueue.Reader.TryRead(out var first))batch.Add(first);
                 // Let ready producers join the transaction without delaying isolated writes.
                 await Task.Yield();
@@ -53,6 +57,11 @@ public sealed partial class History : IAsyncDisposable
                     try{foreach(var item in batch)item.Action(db);tx.Commit();CommittedBatches++;}
                     finally{_executingHistory=null;_batchConnection=null;}
                 }
+                // Optional derived consumers run only after commit, outside the write
+                // transaction. Their exceptions cannot close the sampling queue.
+                foreach(var change in _routeSourceChanges.Distinct())
+                    if(RouteSourceCommitted is {} handlers)foreach(Action<string?,string?> handler in handlers.GetInvocationList())
+                        try{handler(change.Target,change.Route);}catch{ /* Derived analysis is isolated. */ }
                 foreach(var item in batch)item.Completion.TrySetResult();
             }
         }

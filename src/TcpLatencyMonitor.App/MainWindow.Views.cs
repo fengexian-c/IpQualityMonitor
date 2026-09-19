@@ -22,7 +22,7 @@ public sealed partial class MainWindow
             _settings.BackgroundNodeMetadata=BackgroundMetadataBox.IsChecked==true;
             if(_annotationService is not null)_annotationService.Mode=!_settings.EnableNodeMetadata||!_geoConfigurationValid?0:_settings.BackgroundNodeMetadata?2:1;
             _settings.Save();_lastViewAttemptId=null;
-            if(_displayedRoute is not null)RenderRoute(_displayedRoute);
+            if(RouteRawPanel.Visibility==Visibility.Visible&&_displayedRoute is not null)RenderRoute(_displayedRoute);
         }
         catch(Exception ex){ShowError(ex);}
     }
@@ -39,15 +39,17 @@ public sealed partial class MainWindow
     {
         if(_selectingProfile||_primaryTarget is null||ViewMode!="Both")return;
         _target=ViewProtocolBox.SelectedIndex==1?_secondaryTarget:_primaryTarget;if(_target is null)return;
-        _selectionVersion++;_lastSample=null;LatestValue.Text="—";_recordsDirty=true;_timelineKey=null;
+        _selectionVersion++;CancelRouteHistoryLoad();_lastSample=null;LatestValue.Text="—";_recordsDirty=true;_timelineKey=null;
         TargetText.Text=_target.Label;AvailabilityLabel.Text=_target.Protocol==ProbeProtocol.Icmp?"近 5 分钟回应率":"近 5 分钟建连成功率";
         if(_sessions.TryGetValue(_target.Key,out var state))DisplaySession(state);else{SessionText.Text="本次运行 · 暂无采样";FailureText.Text="连续失败 · —";}
         await RefreshAsync();
+        if(RouteRawPanel.Visibility==Visibility.Visible&&_displayedRoute?.TargetKey==RouteTarget?.Key&&_displayedRoute is not null)RenderRoute(_displayedRoute);
     }
     private async void Page_Changed(object sender,SelectionChangedEventArgs e)
     {
         if(OverviewPanel is null||RoutePanel is null||EventsPanel is null)return;
         _detailLoadedKey=null;_selectionVersion++;Chart.InvalidatePlot();
+        CancelRouteHistoryLoad();
         if(_annotationService?.Mode==1)_annotationService.CancelRequests();
         CancelMetadata();
         OverviewPanel.Visibility=PageBox.SelectedIndex==0?Visibility.Visible:Visibility.Collapsed;
@@ -73,27 +75,20 @@ public sealed partial class MainWindow
     }
     private async Task RefreshDetailsAsync()
     {
-        if(!_recordsDirty||_target is null||RouteTarget is null)return;
+        if(PageBox.SelectedIndex==1){await RefreshRouteHistoryAsync();return;}
+        if(PageBox.SelectedIndex!=2||!_recordsDirty||_target is null||RouteTarget is null)return;
         _recordsDirty=false;int selection=_selectionVersion;var target=_target;var routeTarget=RouteTarget;
         var result=await Task.Run(()=>
         {
-            var routes=_history.LoadRoutes(routeTarget,200);var events=_history.LoadEvents(target,100);
+            var events=_history.LoadEvents(target,100);
             if(target.Key!=routeTarget.Key)events=events.Concat(_history.LoadEvents(routeTarget,100)).OrderByDescending(e=>e.Time).Take(100).ToList();
-            return (routes,events);
+            return events;
         });
         if(_hidden||_workspaceView!=1||selection!=_selectionVersion||_target?.Key!=target.Key){_recordsDirty=true;return;}
-        _routes=result.routes;
-        if(PageBox.SelectedIndex==1)
-        {
-        string? selected=(RouteSelector.SelectedItem as ComboBoxItem)?.Tag as string;
-        _routes=result.routes;_loadingRoutes=true;RouteSelector.Items.Clear();
-        foreach(var run in _routes)RouteSelector.Items.Add(new ComboBoxItem{Content=$"{run.Started.ToLocalTime():MM-dd HH:mm:ss} · {run.Reason} · {(run.Reached?"到达目标":"部分路径")}",Tag=run.Id});
-        int index=_routes.FindIndex(r=>r.Id==selected);RouteSelector.SelectedIndex=_routes.Count==0?-1:index<0?0:index;_loadingRoutes=false;RenderSelectedRoute();
-        }
         if(PageBox.SelectedIndex!=2)return;
         EventRows.Children.Clear();
-        if(result.events.Count==0)EventRows.Children.Add(new TextBlock{Text="当前配置暂无事件。",FontSize=13});
-        foreach(var item in result.events)
+        if(result.Count==0)EventRows.Children.Add(new TextBlock{Text="当前配置暂无事件。",FontSize=13});
+        foreach(var item in result)
         {
             var content=new StackPanel{Spacing=6};
             content.Children.Add(new TextBlock{Text=$"{item.Time.ToLocalTime():MM-dd HH:mm:ss} · {IncidentDetector.Label(item.Kind)}",FontWeight=Microsoft.UI.Text.FontWeights.SemiBold,FontSize=13});
@@ -118,9 +113,10 @@ public sealed partial class MainWindow
             if(route is null){StatusText.Text="关联路由不在当前保留期内。";return;}
             SetWorkspace(1);PageBox.SelectedIndex=1;
             await RefreshAsync();
-            // Select from the list when available; older records can still be opened by ID.
-            int index=_routes.FindIndex(r=>r.Id==id);if(index>=0)RouteSelector.SelectedIndex=index;
-            RenderRoute(route);
+            if(RouteTarget?.Key!=target.Key||PageBox.SelectedIndex!=1)return;
+            if(_routeHistory?.Memberships.TryGetValue(id,out var member)==true)await SelectHistoryObservationAsync(member,false);
+            _routeHistoryReading=true;_routeCellRun=id;
+            await LoadRawRouteAsync(route.Id);
         }
         catch(Exception ex){ShowError(ex);}
     }
@@ -128,15 +124,15 @@ public sealed partial class MainWindow
     private void RenderSelectedRoute()
     {
         if(RouteRows is null)return;
-        if(RouteSelector.SelectedIndex<0||RouteSelector.SelectedIndex>=_routes.Count){CancelMetadata();_displayedRoute=null;RouteRows.Children.Clear();RouteDetails.Text="暂无路由记录。";return;}
-        RenderRoute(_routes[RouteSelector.SelectedIndex]);
+        if(RouteSelector.SelectedItem is ComboBoxItem{Tag:string id})_=LoadRawRouteAsync(id);
     }
     private void RenderRoute(RouteRun run)
     {
-        if(_hidden||_workspaceView!=1||PageBox.SelectedIndex!=1){_recordsDirty=true;return;}
+        if(_hidden||_workspaceView!=1||PageBox.SelectedIndex!=1||run.TargetKey!=RouteTarget?.Key){_recordsDirty=true;return;}
         CancelMetadata();_displayedRoute=run;
         var annotations=new Dictionary<string,List<TextBlock>>();
         RouteDetails.Text=$"{run.Started.ToLocalTime():yyyy-MM-dd HH:mm:ss} → {run.Finished.ToLocalTime():HH:mm:ss}\n{run.Outcome} · 超时 {run.TimeoutMs} ms · 最多 {run.MaxHops} 跳\n目标 {run.Address}\n{(string.IsNullOrEmpty(run.ContextDescription)?"此快照未记录出口说明":run.ContextDescription)}";
+        if(_routeRawIsReference)RouteDetails.Text="参考来源 · 以下均为来源快照实测数据\n"+RouteDetails.Text;
         if(run.ProbeOptions is RouteOptions policy)
             RouteDetails.Text+=$"\n初测 {policy.Queries} 次 / 间隔 {policy.InitialSpacingMs} ms；无回应跳补测间隔 {policy.SupplementSpacingMs} ms，每跳合计最多 {policy.MaxAttemptsPerHop} 次\n补测最多 {policy.SupplementBudgetSeconds} 秒，计入整轮 {run.BudgetSeconds} 秒预算";
         if(run.SupplementOutcome.Length>0)RouteDetails.Text+="\n"+run.SupplementOutcome;
@@ -156,6 +152,14 @@ public sealed partial class MainWindow
                     if(local is null){if(!annotations.TryGetValue(address.Key,out var list))annotations[address.Key]=list=new();list.Add(note);}
                 }
             }
+            var probeDetails=new Expander{Header="逐次探测时间 / 状态",FontSize=11,HorizontalAlignment=HorizontalAlignment.Stretch,Visibility=RouteProbeTimesBox.IsChecked==true?Visibility.Visible:Visibility.Collapsed};
+            probeDetails.Expanding+=(sender,_)=>
+            {
+                if(sender is not Expander details||details.Content is not null)return;
+                details.Content=new TextBlock{FontSize=11,TextWrapping=TextWrapping.Wrap,IsTextSelectionEnabled=true,
+                    Text=string.Join("\n",hop.OrderBy(p=>p.Sequence).Select(p=>$"#{p.Sequence} · {(p.IsSupplemental?"补测":"初测")} · {(p.SentAt is {} sent?sent.ToLocalTime().ToString("HH:mm:ss.fff"):"发送时间未记录")} · {p.Address??"—"} · {p.Label} · RTT {RouteTableRow.FormatRtt(p.RttMs)} ms"))};
+            };
+            panel.Children.Add(probeDetails);
             RouteRows.Children.Add(new Border{Padding=new Thickness(12),Background=(SolidColorBrush)Application.Current.Resources["PanelBackgroundBrush"],CornerRadius=new CornerRadius(6),Child=panel});
         }
         if(PageBox.SelectedIndex==1&&_metadataClient is not null)
@@ -163,6 +167,11 @@ public sealed partial class MainWindow
             _metadataCancellation=new CancellationTokenSource();
             _annotationTask=FillAnnotationsAsync(run,annotations,MetadataBox.IsChecked==true,_metadataCancellation.Token);
         }
+    }
+    private void RouteProbeTimes_Click(object sender,RoutedEventArgs e)
+    {
+        foreach(var expander in RouteRows.Children.OfType<Border>().Select(b=>(StackPanel)b.Child).SelectMany(p=>p.Children.OfType<Expander>()))
+            expander.Visibility=RouteProbeTimesBox.IsChecked==true?Visibility.Visible:Visibility.Collapsed;
     }
     private async Task VerifyAnnotationsAsync(Action<bool,string> check)
     {

@@ -51,12 +51,14 @@ public sealed partial class MainWindow
     }
     private async Task FillAnnotationsAsync(RouteRun route,Dictionary<string,List<TextBlock>> labels,bool online,CancellationToken token)
     {
+        int selection=_selectionVersion;
+        bool Current()=>!token.IsCancellationRequested&&selection==_selectionVersion&&_displayedRoute?.Id==route.Id&&RouteTarget?.Key==route.TargetKey&&_workspaceView==1&&PageBox.SelectedIndex==1&&!_hidden;
         try
         {
             bool original=OriginalAnnotationBox.IsChecked==true;
             var result=await Task.Run(()=>original?_history.LoadRouteAnnotation(route.Id,true):_history.CurrentRouteAnnotation(route,DateTimeOffset.UtcNow),token);
             if(result is null)result=await Task.Run(()=>PreviewAnnotation(route),token);
-            if(token.IsCancellationRequested)return;
+            if(!Current())return;
             ApplyAnnotation(result,labels);
             if(online&&!original&&_lastViewAttemptId!=route.Id&&result.Nodes.Any(n=>NodeMetadataClient.LocalLabel(n.Address) is null&&(n.Metadata?.Source!=_metadataClient!.Options.Primary||!NodeMetadataClient.IsFresh(n.Metadata,_metadataClient.Options,DateTimeOffset.UtcNow)))&&
                 !result.Origin.Contains("重新解释")&&!result.Origin.Contains("无当时")&&_annotationService is not null)
@@ -64,13 +66,13 @@ public sealed partial class MainWindow
                 _lastViewAttemptId=route.Id;
                 RouteAnnotationEvidence.Text+=" · 正在补全（每轮最多 20 秒）";
                 var updated=await _annotationService.Request(route,true);
-                if(!token.IsCancellationRequested&&updated is not null)ApplyAnnotation(updated,labels);
+                if(Current()&&updated is not null)ApplyAnnotation(updated,labels);
             }
         }
         catch(OperationCanceledException){}
         catch(Exception ex)
         {
-            if(token.IsCancellationRequested)return;
+            if(!Current())return;
             Services.StartupDiagnostics.Write("Route annotation view failed.",ex);RouteAnnotationEvidence.Text="注释暂不可用，探测不受影响。";
             foreach(var block in labels.Values.SelectMany(v=>v))
                 if(block.Text=="正在读取节点注释…")block.Text="节点注释读取失败；可点击“补全注释”重试。";
@@ -106,6 +108,6 @@ public sealed partial class MainWindow
         var route=_displayedRoute;OriginalAnnotationBox.IsChecked=false;
         RouteAnnotationEvidence.Text="正在补全注释；查询有超时上限，探测继续运行。";
         await _annotationService.Request(route,true);
-        if(_displayedRoute?.Id==route.Id)RenderRoute(route);
+        if(RouteRawPanel.Visibility==Visibility.Visible&&_displayedRoute?.Id==route.Id)RenderRoute(route);
     }
 }

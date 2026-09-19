@@ -85,6 +85,7 @@ public sealed partial class History
                     table=="minute_summary"?"bucket_ms < $cutoff-$cutoff%60000":table=="node_route_seen"?"last_seen_ms < $cutoff":table is "node_metadata" or "geo_observation"?"expires_ms < $cutoff":"time_ms < $cutoff";
                 cmd.CommandText=$"DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {filter} LIMIT 2000)";
                 cmd.Parameters.AddWithValue("$cutoff",now.AddDays(-31).ToUnixTimeMilliseconds());deleted=cmd.ExecuteNonQuery();
+                if(deleted>0&&table is "route_run" or "monitor_event")RouteSourceChanged(null);
             });
             more|=deleted==2000;
         }

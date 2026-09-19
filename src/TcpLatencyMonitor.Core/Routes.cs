@@ -17,6 +17,7 @@ public sealed record RouteRun(string Id,string TargetKey,string Address,string C
     string Reason,string Outcome,bool Reached,int TimeoutMs,int MaxHops,IReadOnlyList<HopProbe> Probes)
 {
     public string ContextDescription { get; init; }="";
+    public string? ProbeExecutionId { get; init; }
     public int BudgetSeconds{get;init;}=60;
     public int PayloadBytes=>32;
     // Null on historical snapshots: never invent a policy for old observations.
@@ -159,7 +160,7 @@ public sealed class RouteProbe(IHopProbe probe)
         }
         token.ThrowIfCancellationRequested();
         return new RouteRun(Guid.NewGuid().ToString("N"),target.Key,target.Address,context,start,DateTimeOffset.UtcNow,reason,outcome,reached,options.TimeoutMs,options.MaxHops,samples)
-            {BudgetSeconds=options.BudgetSeconds,ProbeOptions=options,InitialReached=initialReached,SupplementOutcome=supplementOutcome};
+            {ProbeExecutionId=Guid.NewGuid().ToString("N"),BudgetSeconds=options.BudgetSeconds,ProbeOptions=options,InitialReached=initialReached,SupplementOutcome=supplementOutcome};
     }
 }
 

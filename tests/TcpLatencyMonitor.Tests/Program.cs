@@ -3,6 +3,11 @@ using System.Net.Sockets;
 using System.Text.Json;
 using TcpLatencyMonitor.Core;
 Console.OutputEncoding=System.Text.Encoding.UTF8;
+if(args.Length>0&&args[0]=="--route-history")
+{
+    int checks=0;await RouteHistoryChecks.Run((condition,label)=>{if(!condition)throw new InvalidOperationException("FAIL: "+label);checks++;Console.WriteLine("PASS: "+label);});
+    Console.WriteLine($"ALL {checks} ROUTE HISTORY CHECKS PASSED.");return;
+}
 
 if(args.Length>0&&args[0]=="--nexttrace")
 {
@@ -198,6 +203,7 @@ await LocationChecks.Run(Check);
 await GeoEvidenceChecks.Run(Check);
 await NextTraceChecks.Run(Check);
 RouteTableChecks.Run(Check);
+await RouteHistoryChecks.Run(Check);
 Console.WriteLine($"ALL {passed} CHECKS PASSED. Test data: {fixture}");
 
 sealed class SlowProbe:IProbe

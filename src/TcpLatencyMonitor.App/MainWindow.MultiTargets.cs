@@ -109,6 +109,7 @@ public sealed partial class MainWindow
     }
     private void ApplyDisplayTargets(TargetProfile profile)
     {
+        ResetRouteHistoryView();
         _primaryTarget=profile.Primary;_secondaryTarget=profile.Secondary;
         _target=profile.Mode=="Both"&&ViewProtocolBox.SelectedIndex==1?_secondaryTarget:_primaryTarget;
         ViewProtocolBox.Visibility=profile.Mode=="Both"?Visibility.Visible:Visibility.Collapsed;
@@ -175,12 +176,13 @@ public sealed partial class MainWindow
         GlobalProtocolBox.Visibility=view is 0 or 2?Visibility.Visible:Visibility.Collapsed;
         WorkspaceTitle.Text=view==3?"统一设置":view==0?"全部目标":view==2?"时段对比":_settings.Profiles.FirstOrDefault(p=>p.Id==_selectedProfileId)?.DisplayName??"目标详情";
         ExportButton.IsEnabled=view==1&&_target is not null;DashboardScroll.ChangeView(null,0,null,true);
-        if(view!=1)CancelMetadata();else Chart.InvalidatePlot();
+        if(view!=1){CancelMetadata();CancelRouteHistoryLoad();}else Chart.InvalidatePlot();
         RenderVisibleMulti();
     }
     private async void AllTargets_Click(object sender,RoutedEventArgs e){SetWorkspace(0);await RefreshAsync();}
     private void AddTarget_Click(object sender,RoutedEventArgs e)
     {
+        ResetRouteHistoryView();
         _selectedProfileId=null;_viewRevision=null;_selectionVersion++;_target=_primaryTarget=_secondaryTarget=null;
         _cancellation?.Dispose();_cancellation=null;ApplyEditor(new TargetProfile());SetRunning(false);
         TargetEditor.IsExpanded=true;InputError.Visibility=Visibility.Collapsed;TargetText.Text="填写新目标后保存或开始监控";SetWorkspace(0);NameBox.Focus(FocusState.Programmatic);
@@ -191,7 +193,7 @@ public sealed partial class MainWindow
         try
         {
             await _manager.StopAsync(profile.Id);_settings.Profiles.Remove(profile);_settings.ArchivedProfiles.Add(profile);_compared.Remove(profile.Id);
-            var next=_settings.Profiles.FirstOrDefault();if(next is not null)SelectProfile(next);else{_selectedProfileId=null;_target=_primaryTarget=_secondaryTarget=null;ApplyEditor(new TargetProfile());SetRunning(false);}
+            var next=_settings.Profiles.FirstOrDefault();if(next is not null)SelectProfile(next);else{ResetRouteHistoryView();_selectedProfileId=null;_target=_primaryTarget=_secondaryTarget=null;ApplyEditor(new TargetProfile());SetRunning(false);}
             _settings.SelectedProfileId=_selectedProfileId??"";_settings.Save();RebuildTargetList();_multiLoaded=DateTimeOffset.MinValue;SetWorkspace(0);await RefreshAsync();
             StatusText.Text="目标已移除，历史保留；可通过“恢复已移除目标”找回。";
         }

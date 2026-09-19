@@ -13,6 +13,7 @@ public sealed partial class MainWindow
     {
         if(PeriodBox is null||Chart is null)return;
         _timelineDays=PeriodBox.SelectedIndex==1?7:1;_timelineKey=null;_timeline=null;_multiLoaded=DateTimeOffset.MinValue;_detailLoadedKey=null;Chart.ClearSelection();
+        _recordsDirty=true;CancelRouteHistoryLoad();
         HourDetail.Text="点击一个小时，可在折线图中定位对应时段。";
         if(_initialized){_settings.TimelineDays=_timelineDays;try{_settings.Save();}catch(Exception ex){ShowError(ex);}}
         await RefreshAsync();

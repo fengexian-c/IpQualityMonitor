@@ -131,6 +131,9 @@ public sealed partial class MainWindow
         foreach(var profile in _settings.Profiles)runs.AddRange(await Task.Run(()=>_history.LoadRoutes(profile.Primary,1)));
         foreach(var run in runs.DistinctBy(r=>r.Id))await Task.Run(()=>_history.ReinterpretWithCurrentEvidence(run));
         _overviewRouteDirty=true;_recordsDirty=true;_multiLoaded=DateTimeOffset.MinValue;
-        if(!_hidden&&_workspaceView==1&&_displayedRoute is not null){OriginalAnnotationBox.IsChecked=false;RenderRoute(_displayedRoute);}await RefreshAsync();
+        if(!_hidden&&_workspaceView==1&&PageBox.SelectedIndex==1&&RouteRawPanel.Visibility==Visibility.Visible&&_displayedRoute?.TargetKey==RouteTarget?.Key&&_displayedRoute is not null)
+        {OriginalAnnotationBox.IsChecked=false;RenderRoute(_displayedRoute);}
+        await RefreshAsync();
+        _routeMatrixTask=RefreshRouteMatrixMetadataAsync();await _routeMatrixTask;
     }
 }

@@ -48,7 +48,8 @@ public sealed partial class MainWindow
         var legacyLabels=RouteRows.Children.OfType<Border>().Select(b=>(StackPanel)b.Child).SelectMany(p=>p.Children.OfType<TextBlock>()).Select(t=>t.Text).ToArray();
         check(legacyLabels.Any(s=>s.Contains("电信 163")&&s.Contains("圣何塞"))&&legacyLabels.All(s=>!s.Contains("正在读取节点注释")),"NativeAOT reads genuine old-format metadata without leaving loading placeholders");
         var waiting=new TextBlock{Text="正在读取节点注释…"};var retained=new TextBlock{Text="已有节点证据"};
-        await FillAnnotationsAsync(legacyRun with{Id=Guid.NewGuid().ToString("N"),Address="invalid-fixture-address"},new Dictionary<string,List<TextBlock>>{{legacyIp,new List<TextBlock>{waiting,retained}}},false,CancellationToken.None);
+        var failedRun=legacyRun with{Id=Guid.NewGuid().ToString("N"),Address="invalid-fixture-address"};_displayedRoute=failedRun;
+        await FillAnnotationsAsync(failedRun,new Dictionary<string,List<TextBlock>>{{legacyIp,new List<TextBlock>{waiting,retained}}},false,CancellationToken.None);_displayedRoute=legacyRun;
         check(waiting.Text.Contains("读取失败")&&retained.Text=="已有节点证据","annotation read failure clears loading placeholders and preserves displayed evidence");
         NodeMetadata Meta(string address,string provider,string region,string city)=>new(address,true,4134,"CHINANET","CHINANET","United States",region,city,now,now.AddDays(7),""){ProviderId=provider};
         _history.SaveNodeMetadata(Meta(ip,"ipwho.is","District of Columbia","Washington"));_history.SaveNodeMetadata(Meta(ip,"ipinfo-core","California","San Jose"));

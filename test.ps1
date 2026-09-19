@@ -1,4 +1,4 @@
-param([string]$Dotnet='dotnet',[string]$Packages='',[ValidateSet('all','locations','table','routes','multi','geo')][string]$Selection='all')
+param([string]$Dotnet='dotnet',[string]$Packages='',[ValidateSet('all','locations','table','routes','route-history','multi','geo')][string]$Selection='all')
 $ErrorActionPreference='Stop'
 $env:DOTNET_CLI_HOME=Join-Path $PSScriptRoot '.dotnet-home'
 $env:APPDATA=Join-Path $PSScriptRoot '.appdata'

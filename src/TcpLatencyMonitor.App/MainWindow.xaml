@@ -188,8 +188,35 @@
      <StackPanel x:Name="RoutePanel" Spacing="14" Visibility="Collapsed">
       <Grid><TextBlock Text="本地 → 目标 · ICMP 路由" FontSize="16" FontWeight="SemiBold"/><Button x:Name="RouteButton" Content="立即检查" Click="Route_Click" HorizontalAlignment="Right" IsEnabled="False"/></Grid>
       <TextBlock x:Name="RouteStatus" Text="开始监控后，自动记录第一份路由快照。" TextWrapping="Wrap" Style="{StaticResource MetricLabel}"/>
-      <ComboBox x:Name="RouteSelector" HorizontalAlignment="Stretch" PlaceholderText="选择历史路由（最近 200 次）" SelectionChanged="RouteSelection_Changed"/>
+      <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <TextBlock x:Name="RouteHistoryInfo" Text="正在读取路由历史…" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center"/>
+       <Button x:Name="RouteHistoryUpdate" Grid.Column="1" Content="更新至最新" Click="RouteHistoryUpdate_Click" Visibility="Collapsed"/>
+      </Grid>
+      <controls:LatencyChart x:Name="RouteHistoryChart" Height="100"/>
+      <Canvas x:Name="RouteHistoryAxis" Height="76" HorizontalAlignment="Stretch" Background="Transparent" SizeChanged="RouteHistoryAxis_SizeChanged" PointerPressed="RouteHistoryAxis_PointerPressed"/>
+      <TextBlock x:Name="RouteTimeLabels" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource SecondaryTextBrush}"/>
+      <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+       <TextBlock Text="路径对比 · 相同跳数对齐" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center"/>
+       <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="12">
+        <CheckBox x:Name="RouteHistoryReferences" Content="历史参考" IsChecked="True" Click="RouteHistoryDisplay_Click" FontSize="12"/>
+        <CheckBox x:Name="RouteHistoryAllNodes" Content="显示全部节点" Click="RouteHistoryDisplay_Click" FontSize="12"/>
+       </StackPanel>
+      </Grid>
+      <ScrollViewer MaxHeight="500" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"><Grid x:Name="RouteHistoryGrid" Padding="4"/></ScrollViewer>
+      <StackPanel x:Name="RoutePatternPages" Orientation="Horizontal" Spacing="10" Visibility="Collapsed"><Button x:Name="RoutePatternPrevious" Content="上一组路径" Click="RoutePatternPrevious_Click"/><TextBlock x:Name="RoutePatternPageText" VerticalAlignment="Center"/><Button x:Name="RoutePatternNext" Content="下一组路径" Click="RoutePatternNext_Click"/></StackPanel>
+      <TextBlock x:Name="RouteMatrixInfo" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource SecondaryTextBrush}"/>
+      <TextBlock x:Name="RouteCellDetails" Text="点击节点查看本次探测与参考出处。" IsTextSelectionEnabled="True" FontSize="12" TextWrapping="Wrap"/>
+      <StackPanel Orientation="Horizontal" Spacing="10">
+       <Button x:Name="RouteCellOriginal" Content="查看本次原始探测" Click="RouteCellOriginal_Click" IsEnabled="False" FontSize="12"/>
+       <Button x:Name="RouteCellReferenceOriginal" Content="查看参考来源探测" Click="RouteCellReferenceOriginal_Click" IsEnabled="False" FontSize="12"/>
+       <Button Content="原始快照 / 注释" Click="RouteRawToggle_Click" FontSize="12"/>
+      </StackPanel>
+      <TextBlock x:Name="RouteHistoryVersion" FontSize="11" TextWrapping="Wrap" Foreground="{ThemeResource SecondaryTextBrush}"/>
+      <StackPanel x:Name="RouteRawPanel" Spacing="10" Visibility="Collapsed">
+      <ComboBox x:Name="RouteSelector" HorizontalAlignment="Stretch" PlaceholderText="选择原始快照（每页 100 条）" SelectionChanged="RouteSelection_Changed"/>
+      <StackPanel Orientation="Horizontal" Spacing="10"><Button x:Name="RouteRecordPrevious" Content="上一页" Click="RouteRecordPrevious_Click"/><TextBlock x:Name="RouteRecordPage" VerticalAlignment="Center"/><Button x:Name="RouteRecordNext" Content="下一页" Click="RouteRecordNext_Click"/></StackPanel>
        <StackPanel Orientation="Horizontal" Spacing="8"><Button Content="补全 / 更新注释" Click="Reannotate_Click" FontSize="12"/><CheckBox x:Name="OriginalAnnotationBox" Content="查看最早保存的注释" Click="OriginalAnnotation_Click" FontSize="12"/></StackPanel>
+       <CheckBox x:Name="RouteProbeTimesBox" Content="显示逐次探测明细" Click="RouteProbeTimes_Click" FontSize="12"/>
        <StackPanel Orientation="Horizontal" Spacing="8">
         <Button Content="统一设置" Click="UnifiedSettings_Click" FontSize="12"/>
         <Button Content="校准节点" Click="GeoNodeSelect_Click" FontSize="12"/>
@@ -199,6 +226,7 @@
       <TextBlock x:Name="RouteAnnotationEvidence" TextWrapping="Wrap" FontSize="11" Foreground="{ThemeResource SecondaryTextBrush}"/>
       <StackPanel x:Name="RouteRows" Spacing="9"/>
       <TextBlock Text="初测每跳 3 次；无回应节点在时间预算内补测，合计最多 10 次，取得回应即停止补测。未回应不等于实际业务丢包，补测发现的节点单独标明。" TextWrapping="Wrap" Style="{StaticResource MetricLabel}"/>
+      </StackPanel>
      </StackPanel>
      <StackPanel x:Name="EventsPanel" Spacing="14" Visibility="Collapsed">
       <TextBlock Text="异常与事件" FontSize="16" FontWeight="SemiBold"/>

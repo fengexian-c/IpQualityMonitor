@@ -19,9 +19,9 @@ public sealed partial class MainWindow
         PageBox.SelectedIndex=1;await RefreshAsync();RenderRoute(run);await _annotationTask;
         var cards=RouteRows.Children.OfType<Border>().Select(b=>(StackPanel)b.Child).ToArray();
         string Header(int i)=>((TextBlock)cards[i].Children[0]).Text;
-        check(Header(0)=="第 7 跳 · 回应 1/3 · 超时 2 次"&&cards[0].Children.Count==3,
+        check(Header(0)=="第 7 跳 · 回应 1/3 · 超时 2 次"&&cards[0].Children.OfType<Microsoft.UI.Xaml.FrameworkElement>().Count(c=>c.Visibility==Microsoft.UI.Xaml.Visibility.Visible)==3,
             "native details show one response and its annotation with timeout count only in the heading");
-        check(Header(1).Contains("回应 0/10 · 超时 10 次（初测 0/3，补测 0/7）")&&cards[1].Children.Count==1,
+        check(Header(1).Contains("回应 0/10 · 超时 10 次（初测 0/3，补测 0/7）")&&cards[1].Children.OfType<Microsoft.UI.Xaml.FrameworkElement>().Count(c=>c.Visibility==Microsoft.UI.Xaml.Visibility.Visible)==1,
             "native all-silent card contains just its heading, without any placeholder rows");
         check(Header(2).Contains("初测 0/3，补测 1/1")&&((TextBlock)cards[2].Children[1]).Text.Contains("补测 12 ms"),
             "native retry card distinguishes supplemental response provenance and latency");

@@ -3,7 +3,10 @@ $ErrorActionPreference='Stop'
 if(!$OutputRoot){$OutputRoot=Join-Path $PSScriptRoot 'artifacts'}
 $taskRoot=[IO.Path]::GetFullPath($OutputRoot)
 $taskStage=Join-Path $taskRoot ('.stage-'+[Guid]::NewGuid().ToString('N'))
-$taskPackage=Join-Path $taskRoot 'IpQualityMonitor-v2.7.1-win-x64'
+[xml]$taskProjectXml=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'src\TcpLatencyMonitor.App\TcpLatencyMonitor.App.csproj')
+$taskVersion=[string]($taskProjectXml.Project.PropertyGroup.Version | Where-Object {$_} | Select-Object -First 1)
+if($taskVersion -notmatch '^\d+\.\d+\.\d+$'){throw '无法读取发布版本号'}
+$taskPackage=Join-Path $taskRoot ('IpQualityMonitor-v'+$taskVersion+'-win-x64')
 New-Item -ItemType Directory -Path $taskRoot -Force | Out-Null
 & (Join-Path $PSScriptRoot 'build.ps1') -Dotnet $Dotnet -Packages $Packages -Publish -Output $taskStage
 if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
@@ -15,7 +18,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'README.md') -Destination (Join-
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'LICENSE.reference') -Destination $taskStage
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'docs') -Destination (Join-Path $taskStage 'docs') -Recurse
 foreach($taskSymbol in Get-ChildItem -LiteralPath $taskStage -Filter '*.pdb' -Recurse -File){Remove-Item -LiteralPath $taskSymbol.FullName}
-$taskArchive=Join-Path $taskRoot ('IpQualityMonitor-v2.7.1-win-x64-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.zip')
+$taskArchive=Join-Path $taskRoot ('IpQualityMonitor-v'+$taskVersion+'-win-x64-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'.zip')
 Compress-Archive -Path (Join-Path $taskStage '*') -DestinationPath $taskArchive -CompressionLevel Optimal
 # Use a fresh directory if the default runnable copy already exists.
 if(Test-Path -LiteralPath $taskPackage){$taskPackage+='-'+(Get-Date -Format 'yyyyMMdd-HHmmss')}

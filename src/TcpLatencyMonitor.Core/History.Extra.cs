@@ -16,6 +16,8 @@ public sealed record MonitorEvent(string Id,string TargetKey,DateTimeOffset Time
 [JsonSerializable(typeof(RouteAnnotation))]
 [JsonSerializable(typeof(NodeCalibration))]
 [JsonSerializable(typeof(NextTraceImport))]
+[JsonSerializable(typeof(RouteObservation))]
+[JsonSerializable(typeof(RouteFirstDecision))]
 internal partial class DataJson : JsonSerializerContext { }
 
 public sealed partial class History
@@ -62,6 +64,7 @@ public sealed partial class History
         cmd.Parameters.AddWithValue("$id",route.Id);cmd.Parameters.AddWithValue("$t",route.TargetKey);cmd.Parameters.AddWithValue("$time",route.Started.ToUnixTimeMilliseconds());
         cmd.Parameters.AddWithValue("$json",JsonSerializer.Serialize(route,DataJson.Default.RouteRun));cmd.ExecuteNonQuery();
         RememberRouteNodes(db,route);
+        RouteSourceChanged(route.TargetKey,route.Id);
             });
     }
     public List<RouteRun> LoadRoutes(Target target,int limit=10000)
@@ -83,6 +86,7 @@ public sealed partial class History
         using var cmd=db.CreateCommand();cmd.CommandText="INSERT INTO monitor_event VALUES($id,$t,$time,$kind,$detail,$route,$previous)";
         cmd.Parameters.AddWithValue("$id",item.Id);cmd.Parameters.AddWithValue("$t",item.TargetKey);cmd.Parameters.AddWithValue("$time",item.Time.ToUnixTimeMilliseconds());cmd.Parameters.AddWithValue("$kind",item.Kind);cmd.Parameters.AddWithValue("$detail",item.Detail);
         cmd.Parameters.AddWithValue("$route",(object?)item.RouteId??DBNull.Value);cmd.Parameters.AddWithValue("$previous",(object?)item.PreviousRouteId??DBNull.Value);cmd.ExecuteNonQuery();
+        if(item.Kind is "Started" or "Stopped" or "Suspend" or "Resume" or "NetworkChanged")RouteSourceChanged(item.TargetKey);
             });
     }
     public List<MonitorEvent> LoadEvents(Target target,int limit=5000)

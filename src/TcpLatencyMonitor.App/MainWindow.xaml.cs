@@ -59,6 +59,7 @@ public sealed partial class MainWindow : Window
             AppWindow.MoveAndResize(new RectInt32(workArea.X+(workArea.Width-width)/2,workArea.Y+(workArea.Height-height)/2,width,height));
             StartupDiagnostics.Write($"Initial layout: scale={scale}, workArea={workArea.Width}x{workArea.Height}, window={width}x{height}");
             await Task.Run(_history.Initialize);
+            InitializeRouteAnalysis();
             _settings=Settings.Load();
             if(_settings.LoadError is not null)throw new IOException("配置未能读取，原文件已保留："+_settings.LoadError);
             _metadataClient=new NodeMetadataClient(_history);MetadataBox.IsChecked=_settings.EnableNodeMetadata;
@@ -77,6 +78,7 @@ public sealed partial class MainWindow : Window
             {try{await _manager!.StartAsync(profile);}catch(Exception ex){ShowError(ex);}}
             UpdateLiveStates();await RefreshAsync();
             StartupDiagnostics.Write("Monitor initialized.");
+            if(Environment.GetEnvironmentVariable("IPQUALITY_ROUTE_MEMORY_AUDIT")=="1"){await VerifyRouteHistoryMemoryAsync();return;}
             if(Environment.GetEnvironmentVariable("IPQUALITY_MEMORY_AUDIT")=="1"){await RunRenderingMemoryCheckAsync();return;}
             if(Environment.GetEnvironmentVariable("TCP_MONITOR_V4_SELF_TEST")=="1")await VerifyNativeV4Async();
             if(Environment.GetEnvironmentVariable("TCP_MONITOR_SMOKE_TEST")=="1")await VerifyLifecycleAsync();
@@ -162,6 +164,8 @@ public sealed partial class MainWindow : Window
         await VerifyAnnotationsAsync(Check);
         await VerifyOverviewFeaturesAsync(Check);
         await VerifyRouteRepliesAsync(Check);
+        await VerifyRouteHistoryUiAsync(Check);
+        await VerifyRouteHistoryStateAsync(Check);
         await VerifyGeoUiAsync(Check);
         await VerifyMultiTargetUiAsync(Check);
         await VerifyGlobalSettingsAsync(Check);
@@ -196,7 +200,7 @@ public sealed partial class MainWindow : Window
         if(profileIndex>=0)list[profileIndex]=settings.Copy();else list.Add(settings.Copy());
         settings.Profiles=list;settings.Save();_selectedProfileId=settings.Id;_viewRevision=null;
         bool changed=_target?.Key!=target.Key;
-        _primaryTarget=target;_target=mode=="Both"&&ViewProtocolBox.SelectedIndex==1?_secondaryTarget:target;_settings=settings;AddressBox.Text=target.Address;
+        ResetRouteHistoryView();_primaryTarget=target;_target=mode=="Both"&&ViewProtocolBox.SelectedIndex==1?_secondaryTarget:target;_settings=settings;AddressBox.Text=target.Address;
         TargetText.Text=_target!.Label;AvailabilityLabel.Text=_target.Protocol==ProbeProtocol.Icmp?"近 5 分钟回应率":"近 5 分钟建连成功率";ExportButton.IsEnabled=true;
         InputError.Visibility=Visibility.Collapsed;
         if(changed) { _lastSample=null;LatestValue.Text="—";LatestHint.Text="正在读取历史";_recordsDirty=true;_routes.Clear(); }
@@ -382,10 +386,10 @@ public sealed partial class MainWindow : Window
         };
     }
     private void HideToTray()
-    { if(_annotationService?.Mode==1)_annotationService.CancelRequests();CancelMetadata();_hidden=true;RootGrid.Visibility=Visibility.Collapsed;AppWindow.Hide(); }
+    { if(_annotationService?.Mode==1)_annotationService.CancelRequests();CancelMetadata();CancelRouteHistoryLoad();_hidden=true;RootGrid.Visibility=Visibility.Collapsed;AppWindow.Hide(); }
     internal void RestoreFromTray()
     { _hidden=false;RootGrid.Visibility=Visibility.Visible;AppWindow.Show();Activate();_allTargetsDirty=_comparisonDirty=true;_detailLoadedKey=null;UpdateLiveStates();RenderVisibleMulti();_=RefreshAsync(); }
     private async void Exit_Click(object sender,RoutedEventArgs e)=>await ExitAsync();
     private async Task ExitAsync()
-    { if(_allowClose||_stopping)return;_stopping=true;_timer.Stop();CancelMetadata();if(_manager is not null){await _manager.DisposeAsync();_manager=null;}if(_annotationService is not null){await _annotationService.DisposeAsync();_annotationService=null;}await _history.DisposeAsync();_allowClose=true;_tray?.Dispose();_tray=null;Close(); }
+    { if(_allowClose||_stopping)return;_stopping=true;_timer.Stop();CancelMetadata();CancelRouteHistoryLoad();if(_manager is not null){await _manager.DisposeAsync();_manager=null;}if(_annotationService is not null){await _annotationService.DisposeAsync();_annotationService=null;}if(_routeAnalysis is not null){await _routeAnalysis.DisposeAsync();_routeAnalysis=null;}await _history.DisposeAsync();_allowClose=true;_tray?.Dispose();_tray=null;Close(); }
 }

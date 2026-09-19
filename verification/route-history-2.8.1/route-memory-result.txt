@@ -1,0 +1,1 @@
+PASS 300.1 seconds; 1372 synthetic routes; 3 targets; 34 retention cycles; following/frozen/overview/comparison, range/protocol switches and tray; no forced GC.
