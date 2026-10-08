@@ -103,3 +103,20 @@ bash tests/server/smoke-container.sh
 The smoke script owns only a fresh disposable dataset and loopback target. It never reuses production data.
 The build uses pinned base manifest digests and mtr revision; package security updates require deliberate
 rebuild/retest. Registry apt packages are resolved at build time, so this is not a fully bit-reproducible image.
+
+
+## NextTrace annotations implementation (2026-10-08)
+
+Prepared on base `702377e09cc562461deb7f4c61d7c2cb158936cf`:
+- Offline by default; mtr measurement and raw route JSON unchanged
+- Read-only annotation API, separate measured/annotated/queried timestamps, per-IP provenance and stale/attempt states
+- Bounded 128-job queue, coalescing and recovery of the newest 512 configured-target routes from 24 hours; one due public IP per server slice
+- Explicit v3/v4 with no fallback; secret-file-only v4 credential; persistent auth block, quota/cooldown and fair retry order
+- Optional annotation/metadata transactions isolated; real SQLite I/O failures still stop/report the raw writer
+- Pinned Linux amd64 helper and source/license delivery; no new port, root mode or helper capability
+
+Local verification: .NET server build zero warnings/errors; all 320 server checks passed, including existing environment-login suites and new storage/scheduler/provider/process/runtime checks. Existing focused Core suites passed: routes 28, route history 69, multi-target 31, NextTrace 16, geo 46, locations 36. Helper was built from the pinned local dependencies with Go 1.26.5, and mock Go/Python protocol checks passed. JavaScript syntax and static Python checks passed.
+
+Local limitations: Docker is unavailable; Chromium cannot create its sandbox socket (EPERM). The default Windows-oriented Core run reaches an unsupported native ICMP loopback call; it is not reported as a full pass. Container/bridge/HTTP/browser checks are configured for the authorized amd64 CI and must be read on the exact pushed commit before claiming those gates passed.
+
+No real NextTrace service query, user monitoring-target probe, real credential use, deployment, image publication or main merge was performed for this feature. Synthetic PoW cost is not a production resource guarantee. See `docs/NEXTTRACE-DOCKER.md` for privacy, service-permission and validation boundaries.

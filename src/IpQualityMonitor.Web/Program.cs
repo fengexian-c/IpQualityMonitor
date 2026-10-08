@@ -101,7 +101,9 @@ builder.Services.AddSingleton(sp =>
             if (before.Key != after.Key) throw new OperationCanceledException("路由探测期间容器选路改变。");
             return result with { ContextDescription = before.Description };
         });
-    return new MonitorRuntime(sp.GetRequiredService<ServerStorage>(), resources);
+    return new MonitorRuntime(sp.GetRequiredService<ServerStorage>(), resources,
+        new AnnotationEnvironment(builder.Configuration["IPQUALITY_NEXTTRACE_PATH"] ?? builder.Configuration["IPQUALITY_NEXTTRACE_HELPER"] ?? "/usr/local/libexec/iqm-nexttrace-geo",
+            builder.Configuration["IPQUALITY_NEXTTRACE_TOKEN_FILE"]));
 });
 builder.Services.AddSingleton<SharedTimelineReader>();
 builder.Services.AddHostedService<MonitoringHost>();
@@ -163,6 +165,7 @@ api.MapGet("/overview", (MonitorRuntime runtime, MtrPacketClient packets) => Res
 {
     site = runtime.Site, config = runtime.Configuration, targets = runtime.States(),
     serverTime = DateTimeOffset.UtcNow, timeZone = zone.Id, error = runtime.Error,
+    annotationError = runtime.AnnotationError, annotationProvider = runtime.AnnotationProvider,
     analysisError = runtime.AnalysisError, probeError = packets.LastError, pendingProbes = packets.Pending,
     network = "bridge", preview = true
 }));
@@ -178,6 +181,10 @@ api.MapDelete("/targets/{id}", async (string id, long revision, MonitorRuntime r
 { await runtime.RemoveAsync(id, revision); return Results.NoContent(); });
 api.MapPut("/settings", async (PolicyInput input, MonitorRuntime runtime) =>
 { await runtime.SetPolicyAsync(input.Monitoring, input.Revision); return Results.NoContent(); });
+api.MapPut("/annotations/settings", async (AnnotationInput input, MonitorRuntime runtime) =>
+{ await runtime.SetAnnotationsAsync(input.Settings, input.Revision); return Results.NoContent(); });
+api.MapPost("/annotations/reset-auth", async (RevisionInput input, MonitorRuntime runtime) =>
+{ await runtime.ResetAnnotationAuthenticationAsync(input.Revision); return Results.NoContent(); });
 api.MapPost("/targets/{id}/route", (string id, MonitorRuntime runtime) =>
     runtime.RequestRoute(id) ? Results.Accepted() : Results.Conflict(new { error = "目标未运行或请求未被接受。" }));
 api.MapGet("/targets/{id}/timeline", async (string id, string protocol, int days, MonitorRuntime runtime,
@@ -190,6 +197,9 @@ api.MapGet("/targets/{id}/timeline", async (string id, string protocol, int days
 });
 api.MapGet("/targets/{id}/routes", async (string id, MonitorRuntime runtime, HttpContext context) =>
     Results.Ok(await runtime.QueryAsync(h => h.LoadRoutes(runtime.RouteTarget(id), 20), context.RequestAborted)));
+api.MapGet("/targets/{id}/annotations", async (string id, MonitorRuntime runtime, HttpContext context) =>
+    Results.Ok(await runtime.QueryAsync(h => h.LoadRoutes(runtime.RouteTarget(id), 20)
+        .Select(r => runtime.ReadAnnotation(h, r)).ToArray(), context.RequestAborted)));
 api.MapGet("/targets/{id}/events", async (string id, MonitorRuntime runtime, HttpContext context) =>
     Results.Ok(await runtime.QueryAsync(h => h.LoadEvents(runtime.RouteTarget(id), 100), context.RequestAborted)));
 await app.RunAsync();
@@ -198,3 +208,8 @@ internal sealed record LoginInput([property: JsonRequired] string? Username, [pr
 internal sealed record AddTargetInput([property: JsonRequired] long Revision, [property: JsonRequired] TargetInput Target);
 internal sealed record RunningInput([property: JsonRequired] long Revision, [property: JsonRequired] bool Running);
 internal sealed record PolicyInput([property: JsonRequired] long Revision, [property: JsonRequired] GlobalMonitorSettings Monitoring);
+
+
+internal sealed record AnnotationInput([property: JsonRequired] long Revision, [property: JsonRequired] AnnotationSettings Settings);
+
+internal sealed record RevisionInput([property: JsonRequired] long Revision);

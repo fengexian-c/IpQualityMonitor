@@ -52,9 +52,10 @@ public sealed partial class History
         using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT value FROM metadata_state WHERE name=$key";cmd.Parameters.AddWithValue("$key",key);
         return cmd.ExecuteScalar() is long value?value:null;
     }
-    public void SetMetadataValue(string key,long value)=>Write(db=>
+    public bool SetMetadataValue(string key,long value)=>TryWriteOptional(db=>
     {
         using var cmd=db.CreateCommand();cmd.CommandText="INSERT INTO metadata_state VALUES($key,$value) ON CONFLICT(name) DO UPDATE SET value=excluded.value";
         cmd.Parameters.AddWithValue("$key",key);cmd.Parameters.AddWithValue("$value",value);cmd.ExecuteNonQuery();
     });
 }
+

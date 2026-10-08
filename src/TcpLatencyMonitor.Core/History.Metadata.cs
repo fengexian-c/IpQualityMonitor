@@ -24,10 +24,12 @@ public sealed partial class History
         cmd.Parameters.AddWithValue("$ip",address);
         return cmd.ExecuteScalar() is string json?JsonSerializer.Deserialize(json,DataJson.Default.NodeMetadata):null;
     }
-    public void SaveNodeMetadata(NodeMetadata data)
+    /// <summary>False means optional evidence was rejected; measurement history remains writable.</summary>
+    public bool SaveNodeMetadata(NodeMetadata data)
     {
-        Write(db=>
+        return TryWriteOptional(db=>
         {
+        ValidateMetadataEvidence(data);
         SaveObservation(db,data);
         RebuildMetadata(db,data.Address);
         });
@@ -43,9 +45,9 @@ public sealed partial class History
         using var db=Open();using var cmd=db.CreateCommand();cmd.CommandText="SELECT value FROM metadata_state WHERE name=$name";cmd.Parameters.AddWithValue("$name",provider=="ipwho.is"?"cooldown":"cooldown:"+provider);
         return DateTimeOffset.FromUnixTimeMilliseconds(cmd.ExecuteScalar() is long n?n:0);
     }
-    public void SetMetadataCooldown(DateTimeOffset until,string provider="ipwho.is")
+    public bool SetMetadataCooldown(DateTimeOffset until,string provider="ipwho.is")
     {
-        Write(db=>
+        return TryWriteOptional(db=>
         {
         using var cmd=db.CreateCommand();cmd.CommandText="INSERT INTO metadata_state VALUES($name,$v) ON CONFLICT(name) DO UPDATE SET value=MAX(value,excluded.value)";cmd.Parameters.AddWithValue("$name",provider=="ipwho.is"?"cooldown":"cooldown:"+provider);
         cmd.Parameters.AddWithValue("$v",until.ToUnixTimeMilliseconds());cmd.ExecuteNonQuery();
@@ -66,3 +68,4 @@ public sealed partial class History
         return reserved;
     }
 }
+

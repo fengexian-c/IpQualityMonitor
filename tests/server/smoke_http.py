@@ -37,6 +37,12 @@ try:
     raise AssertionError('overview allowed without authentication')
 except urllib.error.HTTPError as error:
     assert error.code == 401, error.code
+for path in ['/api/annotations/settings', '/api/targets/none/annotations']:
+    try:
+        request(path, 'PUT' if path.endswith('settings') else 'GET', {} if path.endswith('settings') else None)
+        raise AssertionError('annotation API allowed unauthenticated')
+    except urllib.error.HTTPError as error:
+        assert error.code in (400, 401), error.code
 csrf = request('/api/auth/csrf')['token']
 with open(a.password_file) as f: password = f.read().rstrip('\r\n')
 request('/api/auth/login', 'POST', {'username': a.username, 'password': password})
@@ -56,6 +62,16 @@ else:
             raise AssertionError('Invalid input was accepted: ' + path)
         except urllib.error.HTTPError as error:
             assert error.code == status, (path, error.code, error.read().decode())
+    assert state['config']['annotations']['mode'] == 'offline'
+    assert 'nextTraceToken' not in json.dumps(state) and 'tokenFile' not in json.dumps(state)
+    rejected('/api/annotations/settings', 'PUT', {'revision': revision - 1, 'settings': {'mode': 'offline'}}, 409)
+    rejected('/api/annotations/settings', 'PUT', {'revision': revision, 'settings': {'mode': 'auto'}}, 400)
+    rejected('/api/annotations/settings', 'PUT', {'revision': revision, 'settings': {'mode': 'v4'}}, 503)
+    assert request('/api/overview')['config']['revision'] == revision, 'Rejected geo settings changed revision'
+    old_csrf = csrf
+    csrf = ''
+    rejected('/api/annotations/settings', 'PUT', {'revision': revision, 'settings': {'mode': 'offline'}}, 400)
+    csrf = old_csrf
     valid_target = {'name': 'validation-only', 'address': '127.0.0.1', 'mode': 'Tcp', 'port': 8080}
     for body in [b'{broken', {}, {'revision': revision}, {'revision': revision, 'target': None},
                  {'target': valid_target},
@@ -118,3 +134,4 @@ print('PASS readiness and SQLite history queries' + ('' if a.tcp_only else ' and
 request('/api/auth/logout', 'POST')
 assert request('/api/auth/session')['authenticated'] is False
 print('PASS logout invalidates authenticated session')
+

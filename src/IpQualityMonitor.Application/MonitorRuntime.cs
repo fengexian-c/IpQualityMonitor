@@ -15,6 +15,12 @@ public sealed class MonitorRuntime : IAsyncDisposable
     private ServerConfiguration _configuration;
     private MultiTargetMonitor? _monitor;
     private RouteAnalysisService? _analysis;
+    private RouteAnnotationService? _annotations;
+    private NodeMetadataClient? _metadata;
+    private readonly AnnotationEnvironment _annotationEnvironment;
+    private string? _annotationError;
+    public string? AnnotationError => _annotationError;
+    public NextTraceProviderState? AnnotationProvider => _metadata?.GetNextTraceState();
     private volatile bool _closing;
     private volatile bool _ready;
     private bool _startAttempted;
@@ -25,8 +31,9 @@ public sealed class MonitorRuntime : IAsyncDisposable
     public string? AnalysisError => _analysis?.LastError?.Message;
     public bool Ready => _ready;
     public ServerConfiguration Configuration => Volatile.Read(ref _configuration).Copy();
-    public MonitorRuntime(ServerStorage storage, MonitorResources resources)
+    public MonitorRuntime(ServerStorage storage, MonitorResources resources, AnnotationEnvironment? annotationEnvironment = null)
     {
+        _annotationEnvironment = annotationEnvironment ?? new();
         _storage = storage; _resources = resources; _configuration = storage.Load();
         History = new History(Path.Combine(storage.DirectoryPath, "history.db"));
     }
@@ -44,7 +51,16 @@ public sealed class MonitorRuntime : IAsyncDisposable
             await Task.Run(History.Initialize).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
             _analysis = new RouteAnalysisService(History, Path.Combine(_storage.DirectoryPath, "route-analysis.db"));
+            _metadata = new NodeMetadataClient(History, nextTrace: _annotationEnvironment.CreateLookup(), nextTracePolicy: new("offline"));
+            try { ConfigureAnnotations(_configuration.Annotations); }
+            catch (InvalidOperationException) { _annotationError = "定位已关闭：v4 密钥文件不可用；原始测量不受影响。"; }
+            _annotations = new RouteAnnotationService(History, _metadata, targetKeys: () =>
+                Configuration.Profiles.Select(p => p.Primary.Key).ToArray());
+            _annotations.Failed += message => _annotationError = message;
+            History.OptionalWriteFailed += _ => _annotationError = "定位记录写入被拒绝；原始测量继续保存。";
+            _annotations.Mode = _annotationError is null && _configuration.Annotations.Mode != "offline" ? 2 : 0;
             _monitor = new MultiTargetMonitor(History, _resources);
+            _monitor.RouteSaved += OnRouteSaved;
             _monitor.StorageFailed += ex => _error = "存储异常，采集已停止：" + ex.Message;
             _monitor.TargetFailed += (_, ex) => _error = "目标采集异常：" + ex.Message;
             foreach (var p in _configuration.Profiles.Where(p => p.ResumeOnLaunch))
@@ -143,6 +159,47 @@ public sealed class MonitorRuntime : IAsyncDisposable
         }
         finally { _operations.Release(); }
     }
+    public AnnotationView ReadAnnotation(History history, RouteRun run) =>
+        AnnotationViews.Read(history, run, Configuration.Annotations.Mode, _metadata is null ? null : _metadata.GetNextTraceAddressState);
+    private void OnRouteSaved(RouteRun run) { if (!_closing) _ = _annotations?.Request(run, false); }
+    private void ConfigureAnnotations(AnnotationSettings settings, string? preparedCredential = null)
+    {
+        settings.Validate();
+        string credential = preparedCredential ?? _annotationEnvironment.ReadToken(settings.Mode);
+        _metadata!.Configure(new MetadataOptions(Primary: "nexttrace", NextTraceToken: credential, RefreshHours: settings.RefreshHours),
+            new NextTraceProviderPolicy(settings.Mode));
+    }
+    public async Task SetAnnotationsAsync(AnnotationSettings settings, long revision)
+    {
+        ArgumentNullException.ThrowIfNull(settings); settings.Validate();
+        await _operations.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            Check(revision);
+            // Read the secret once; cancellation cannot turn a rejected save into a live config change.
+            string credential = _annotationEnvironment.ReadToken(settings.Mode);
+            int previousMode = _annotations!.Mode;
+            _annotations.Mode = 0;
+            try { Commit(_configuration.Copy() with { Annotations = settings }); }
+            catch { _annotations.Mode = previousMode; throw; }
+            ConfigureAnnotations(settings, credential);
+            _annotationError = null;
+            _annotations.Mode = settings.Mode == "offline" ? 0 : 2;
+        }
+        finally { _operations.Release(); }
+    }
+    public async Task ResetAnnotationAuthenticationAsync(long revision)
+    {
+        await _operations.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            Check(revision);
+            Commit(_configuration.Copy());
+            _annotations!.CancelRequests();
+            _metadata!.ResetNextTraceAuthentication();
+        }
+        finally { _operations.Release(); }
+    }
     public bool RequestRoute(string id) => !_closing && Ready && (_monitor?.RequestRoute(id) ?? false);
     public Target Resolve(string id, ProbeProtocol protocol)
     {
@@ -177,12 +234,17 @@ public sealed class MonitorRuntime : IAsyncDisposable
             {
                 try
                 {
-                    if (_monitor is not null) await _monitor.DisposeAsync().ConfigureAwait(false);
+                    if (_monitor is not null) { _monitor.RouteSaved -= OnRouteSaved; await _monitor.DisposeAsync().ConfigureAwait(false); }
                     else await _resources.DisposeAsync().ConfigureAwait(false);
                 }
                 finally
                 {
-                    try { if (_analysis is not null) await _analysis.DisposeAsync().ConfigureAwait(false); }
+                    try
+                    {
+                        try { if (_annotations is not null) await _annotations.DisposeAsync().ConfigureAwait(false); }
+                        finally { _metadata?.Dispose(); }
+                        if (_analysis is not null) await _analysis.DisposeAsync().ConfigureAwait(false);
+                    }
                     finally { await History.DisposeAsync().ConfigureAwait(false); }
                 }
             }
@@ -195,3 +257,4 @@ public sealed class MonitorRuntime : IAsyncDisposable
         finally { _operations.Release(); }
     }
 }
+

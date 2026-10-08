@@ -11,6 +11,18 @@
       "url": "https://codeload.github.com/nxtrace/NTrace-core/zip/40ac803ca233b0bc3d4b3bf1cacc8f7e0d8368f2",
       "file": "nexttrace-v1.7.3.zip",
       "sha256": "352aaa50e656406b2fc0a987a5be50f6991f6c1df2175912e66edbceb3809a0e"
+    },
+    {
+      "url": "https://go.dev/dl/go1.26.5.linux-amd64.tar.gz",
+      "file": "go1.26.5.linux-amd64.tar.gz",
+      "sha256": "5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053",
+      "checksum_source": "https://go.dev/dl/?mode=json&include=all",
+      "verified_at": "2026-10-08"
     }
-  ]
+  ],
+  "linux_hardening": {
+    "script": "patch_linux.py",
+    "original_sources_unchanged": true,
+    "purpose": "No redirects, bounded PoW and WebSocket messages, single auth attempt, structured HTTP failures without response bodies"
+  }
 }

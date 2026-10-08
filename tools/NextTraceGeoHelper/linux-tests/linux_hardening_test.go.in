@@ -1,0 +1,105 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/tsosunchia/powclient"
+)
+
+// Only loopback fake providers are contacted. Production API endpoints are never used.
+func TestLinuxPoWStatusAndNoRedirects(t *testing.T) {
+	for _, code := range []int{302, 401, 403, 429, 503} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				w.Header().Set("Location", "/must-not-follow")
+				w.Header().Set("Retry-After", "Wed, 21 Oct 2037 07:28:00 GMT")
+				w.WriteHeader(code)
+				fmt.Fprint(w, "credential-like-error-body-must-not-leak")
+			}))
+			defer server.Close()
+			params := powclient.NewGetTokenParams()
+			params.BaseUrl = server.URL
+			_, err := powclient.RetToken(params)
+			var status *powclient.HTTPStatusError
+			if !errors.As(err, &status) || status.HTTPStatus() != code || calls.Load() != 1 || status.Body != "" {
+				t.Fatalf("unsafe HTTP failure: calls=%d status=%v", calls.Load(), status)
+			}
+			frame := failure(request{ID: "r1"}, "8.8.8.8", "connection_failed", err, true)
+			body, _ := json.Marshal(frame)
+			if frame["statusCode"] != code || frame["retryAfter"] != "Wed, 21 Oct 2037 07:28:00 GMT" || strings.Contains(string(body), "credential-like") {
+				t.Fatalf("status metadata lost or leaked: %s", body)
+			}
+		})
+	}
+}
+
+func TestLinuxPoWBoundedAndCancelled(t *testing.T) {
+	for _, body := range []string{strings.Repeat(" ", 49153), `{"challenge":{"challenge":"` + strings.Repeat("9", 129) + `"}}`, "not json"} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, body) }))
+		params := powclient.NewGetTokenParams()
+		params.BaseUrl = server.URL
+		if _, err := powclient.RetToken(params); err == nil {
+			t.Fatal("unbounded or malformed challenge accepted")
+		}
+		server.Close()
+	}
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); fmt.Fprint(w, `{}`) }))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	params := powclient.NewGetTokenParams()
+	params.BaseUrl, params.Context = server.URL, ctx
+	_, err := powclient.RetToken(params)
+	if !errors.Is(err, context.Canceled) || calls.Load() != 0 {
+		t.Fatalf("cancelled PoW made a request: %v", err)
+	}
+}
+
+func fakePoWServer() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/request_challenge") {
+			fmt.Fprint(w, `{"challenge":{"request_id":"mock","challenge":"35"},"request_time":1}`)
+		} else {
+			fmt.Fprint(w, `{"token":"mock-only"}`)
+		}
+	}))
+}
+
+func TestLinuxPoWMockSuccess(t *testing.T) {
+	server := fakePoWServer()
+	defer server.Close()
+	params := powclient.NewGetTokenParams()
+	params.BaseUrl = server.URL
+	start := time.Now()
+	token, err := powclient.RetToken(params)
+	if err != nil || token != "mock-only" {
+		t.Fatalf("mock PoW failed: %v", err)
+	}
+	t.Logf("loopback challenge 35: %s (synthetic cost only, not live v3 capacity)", time.Since(start))
+}
+
+func BenchmarkLinuxMockPoW(b *testing.B) {
+	server := fakePoWServer()
+	defer server.Close()
+	params := powclient.NewGetTokenParams()
+	params.BaseUrl = server.URL
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := powclient.RetToken(params); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

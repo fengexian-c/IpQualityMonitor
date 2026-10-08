@@ -31,10 +31,16 @@
       <p id="window"></p><div id="hours" class="hours"></div><p class="muted">折线显示后端汇总的平均延迟，细线表示最低／最高值；红点表示该时间桶存在失败。灰格为无样本或仅本地错误。</p>
       <div class="section-head"><h3>原始 ICMP 路由</h3><button id="probe-route">立即检查路由</button></div>
       <select id="route-list" aria-label="选择最近的路由快照"></select><p id="route-info"></p>
-      <div class="scroll"><table><thead><tr><th>TTL</th><th>原始回应 IP</th><th>回应／次数</th><th>超时／其他</th><th>平均 RTT</th></tr></thead><tbody id="route-hops"></tbody></table></div>
+      <div class="scroll"><table><thead><tr><th>TTL</th><th>原始回应 IP</th><th>回应／次数</th><th>超时／其他</th><th>平均 RTT</th><th>地区（逐 IP）</th><th>ASN / 组织</th><th>来源 / 查询时间 / 状态</th></tr></thead><tbody id="route-hops"></tbody></table></div>
       <details><summary>最近事件（当前主协议）</summary><div id="events"></div></details>
-      <p class="notice">此基础版展示最近 20 份原始路由和 100 条事件。完整路径分支对比、定位注释及 Windows 归档导入尚未接入网页。</p>
+      <p class="notice">此基础版展示最近 20 份原始路由和 100 条事件。定位仅为查询时数据源的估计，不代表测量时的真实物理路线。原始测量不随解释更新；完整路径分支对比及 Windows 归档导入尚未接入网页。</p>
     </section>
+    <section><details><summary>NextTrace 定位注释（默认离线）</summary>
+      <p class="notice">启用 v3 或 v4 后，将逐个发送已观测的公网节点 IP 给 NextTrace；该服务也会看到服务器出口 IP。不上传目标名称、整条路由或历史。GeoIP 不代表真实物理位置。v3 使用 PoW，可能增加 CPU 消耗；v4 仅使用部署时挂载的密钥文件，失败不会回退 v3。服务条款和额度适用。</p>
+      <form id="annotation-form" class="form-grid"><label>模式<select id="annotation-mode"><option value="offline">离线，不发定位请求</option><option value="v3">NextTrace v3 PoW</option><option value="v4">NextTrace v4 密钥文件</option></select></label>
+      <label>成功缓存（小时）<input id="annotation-hours" type="number" min="1" max="168" value="24" required></label><button type="submit">保存定位设置</button></form><p id="annotation-status"></p><button id="annotation-reset-auth" type="button">重新尝试当前模式的鉴权（保留限流）</button>
+      <p>v4 文件更新后重新保存设置以读取新密钥。关闭不会撤回已经发出的请求。应用自限 900 次／滚动 24 小时及至少 300 毫秒间隔，不是服务保证的额度。</p>
+    </details></section>
     <section><details id="settings"><summary>统一监测设置</summary><form id="settings-form" class="form-grid">
       <label>采样间隔（秒）<input name="intervalSeconds" type="number" min="1" max="3600" required></label>
       <label>终点超时（毫秒）<input name="timeoutMilliseconds" type="number" min="100" max="60000" required></label>
@@ -48,3 +54,4 @@
 </main>
 <footer>原始观测与本地错误分开 · 数据保存在你的 /data · 不自动访问预设公网目标</footer>
 </body></html>
+

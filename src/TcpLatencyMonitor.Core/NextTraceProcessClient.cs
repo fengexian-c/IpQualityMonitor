@@ -8,6 +8,7 @@ namespace TcpLatencyMonitor.Core;
 public sealed class NextTraceProcessClient:INextTraceLookup,INextTraceV4Lookup
 {
     private readonly string _path;
+    private readonly TimeSpan _requestTimeout;
     private readonly SemaphoreSlim _gate=new(1,1);
     private readonly object _sync=new();
     private Process? _process;
@@ -15,7 +16,11 @@ public sealed class NextTraceProcessClient:INextTraceLookup,INextTraceV4Lookup
     private bool _disposed;
     private long _sequence;
     private long _idleGeneration;
-    public NextTraceProcessClient(string path)=>_path=Path.GetFullPath(path);
+    public NextTraceProcessClient(string path,TimeSpan? requestTimeout=null)
+    {
+        _path=Path.GetFullPath(path);_requestTimeout=requestTimeout??TimeSpan.FromSeconds(18);
+        if(_requestTimeout<=TimeSpan.Zero||_requestTimeout>TimeSpan.FromMinutes(2))throw new ArgumentOutOfRangeException(nameof(requestTimeout));
+    }
     public async Task<string> LookupAsync(string address,CancellationToken token)
     {
         using var doc=JsonDocument.Parse(await ExchangeAsync(address,"lookup",null,token).ConfigureAwait(false));
@@ -36,6 +41,7 @@ public sealed class NextTraceProcessClient:INextTraceLookup,INextTraceV4Lookup
         if(NodeMetadataClient.LocalLabel(address) is not null)throw new ArgumentException("Only public IPs are accepted");
         address=CidrBlock.Normalize(address);
         await _gate.WaitAsync(token).ConfigureAwait(false);
+        using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);deadline.CancelAfter(_requestTimeout);
         try
         {
             Process process;bool fresh;
@@ -55,7 +61,6 @@ public sealed class NextTraceProcessClient:INextTraceLookup,INextTraceV4Lookup
                 }
                 process=_process!;
             }
-            using var deadline=CancellationTokenSource.CreateLinkedTokenSource(token);deadline.CancelAfter(TimeSpan.FromSeconds(18));
             // Killing the private process also interrupts blocked stdout reads and PoW.
             using var registration=deadline.Token.Register(()=>{lock(_sync){if(ReferenceEquals(_process,process))StopLocked();}});
             if(fresh)
@@ -80,7 +85,13 @@ public sealed class NextTraceProcessClient:INextTraceLookup,INextTraceV4Lookup
                 using var doc=await ReadAsync(process,deadline.Token).ConfigureAwait(false);var e=doc.RootElement;
                 if(!e.TryGetProperty("id",out var responseId)||responseId.GetString()!=id)throw new IOException("定位组件响应序号无效");
                 string type=e.GetProperty("type").GetString()??"";
-                if(type=="error")throw new IOException("定位组件未完成查询");
+                if(type=="error")
+                {
+                    if(e.TryGetProperty("statusCode",out var status)&&status.TryGetInt32(out int code)&&code is >=400 and <=599)
+                        throw new NextTraceProviderException(code,e.TryGetProperty("retryAfter",out var retry)&&retry.ValueKind==JsonValueKind.String?retry.GetString():null);
+                    if(e.TryGetProperty("reason",out var reason)&&reason.GetString()=="timeout")throw new TimeoutException("NextTrace provider request timed out");
+                    throw new IOException("定位组件未完成查询");
+                }
                 if(type=="result")
                 {
                     if(e.GetProperty("ip").GetString()!=address)throw new IOException("定位组件响应地址无效");
@@ -100,7 +111,7 @@ public sealed class NextTraceProcessClient:INextTraceLookup,INextTraceV4Lookup
             }
             throw new IOException("定位组件响应数量异常");
         }
-        catch{lock(_sync)StopLocked();token.ThrowIfCancellationRequested();throw;}
+        catch{lock(_sync)StopLocked();token.ThrowIfCancellationRequested();if(deadline.IsCancellationRequested)throw new TimeoutException("NextTrace helper request timed out");throw;}
         finally{_gate.Release();}
     }
     private static async Task<JsonDocument> ReadAsync(Process process,CancellationToken token)
@@ -135,3 +146,4 @@ public sealed class NextTraceProcessClient:INextTraceLookup,INextTraceV4Lookup
     }
     public void Dispose(){lock(_sync){_disposed=true;StopLocked();}}
 }
+

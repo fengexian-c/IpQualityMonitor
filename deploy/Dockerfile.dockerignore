@@ -14,3 +14,7 @@
 **/*.zip
 outputs
 third_party
+
+
+# Offline Go module source is part of the reproducible GeoIP helper build.
+!tools/NextTraceGeoHelper/dependency-source/**/*.zip

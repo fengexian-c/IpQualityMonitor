@@ -37,7 +37,7 @@ CI 对 `docker/**` 分支在原生 amd64 runner 上构建及冒烟测试，不�
 ## 明确没有完成的部分
 
 此阶段网页是用于验证后台的轻量 HTML/CSS/JavaScript 界面，**不是计划中的最终 Vue 前端**。
-尚未接入完整 2.8.1 路径分支比较、历史参考展示、在线定位/NextTrace、Windows 归档导入、
+尚未接入完整 2.8.1 路径分支比较、历史参考展示、Windows 归档导入、
 在线一致性备份、完整诊断包、目标编辑页面或独立保留策略。
 
 路由分析服务已经作为后台启动并保存首次判断，但当前网页只显示最近 20 份原始路由；
@@ -353,3 +353,12 @@ dotnet run --project tests/TcpLatencyMonitor.Tests/TcpLatencyMonitor.Tests.cspro
 
 验证层次是：完整编译 → 最终镜像权限与 loopback 冒烟 → 受控 IPv4/IPv6 拓扑 → NAS 长期稳定性与恢复测试。
 通过之后，再接入最终 Vue 界面、完整路由历史、定位和 Windows 归档。
+
+
+## NextTrace 定位注释预览
+
+默认离线，保留 mtr 作为唯一测量来源。网页可明确选择离线、v3 PoW 或 v4；注释 API 仅读取已保存证据，查看历史不会启动定位查询。地区、ASN／组织、来源、查询时间及过期状态与原始测量分开展示。
+
+v4 仅接受 `IPQUALITY_NEXTTRACE_TOKEN_FILE` 指定的只读挂载文件；密钥不进入网页配置、SQLite 注释、命令行或镜像。v4 失败不回退 v3。已观测公网节点 IP 及服务器出口 IP 会被 NextTrace 服务看到，启用前请阅读 [配置、隐私、许可与验证边界](NEXTTRACE-DOCKER.md)。
+
+新增故障回归使用模拟服务／helper，不代表真实 NextTrace 服务可用性或权限确认。真实查询和部署需要单独授权。

@@ -128,6 +128,11 @@ await using (var network = new LinuxNetworkContext(executable, "bounded-test"))
 }
 AuthChecks.Run(Check, Reject);
 await RuntimeChecks.RunAsync(Check, Reject);
+await AnnotationStorageChecks.RunAsync(Check, Reject);
+await GeoProviderChecks.RunAsync(Check);
+await AnnotationSchedulerChecks.RunAsync(Check, Reject);
+await AnnotationRuntimeChecks.RunAsync(Check, Reject);
+await NextTraceProcessChecks.RunAsync(Check);
 Console.WriteLine($"ALL {checks} SERVER CHECKS PASSED.");
 
 static async Task FakeMtr(string[] args)
@@ -166,3 +171,4 @@ static async Task FakeMtr(string[] args)
         });
     }
 }
+

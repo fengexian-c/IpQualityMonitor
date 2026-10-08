@@ -56,7 +56,7 @@ public sealed partial class MainWindow
         _history.SaveNodeMetadata(Meta(second,"ipwho.is","California","San Jose"));_history.SaveNodeMetadata(Meta(second,"ipinfo-core","California","Fremont"));
         var target=_primaryTarget!;var run=new RouteRun(Guid.NewGuid().ToString("N"),target.Key,target.Address,"geo UI fixture",now,now,"fixture","partial",false,1000,32,
             new HopProbe[]{new(1,1,"172.16.10.1",11013,1),new(2,1,ip,11013,149.6),new(3,1,second,11013,153.7)});
-        _history.SaveRoute(run);var annotation=_history.ReinterpretWithCurrentEvidence(run);SetOverviewTable(run,annotation);
+        _history.SaveRoute(run);var annotation=_history.ReinterpretWithCurrentEvidence(run) ?? throw new InvalidOperationException("模拟路由注释未保存");SetOverviewTable(run,annotation);
         check(_overviewTableModel!.Rows.Where(r=>r.Addresses.Length>0).All(r=>!r.Merged)&&_overviewTableModel.Rows.Any(r=>r.Nodes[0].Location.Contains("待核对")),"overview renders city conflicts without merging them");
         check(OverviewRouteGrid.Children.OfType<Button>().Count(b=>Grid.GetColumn(b)==2)==2,"overview location cells expose clickable evidence actions");
         SetWorkspace(1);PageBox.SelectedIndex=0;await RefreshAsync();SetOverviewTable(run,annotation);OverviewRouteSummary.Text=annotation.Summary;await CaptureForVerificationAsync("-geo-conflict");
@@ -112,3 +112,4 @@ public sealed partial class MainWindow
         SetOverviewTable(run,_history.ReinterpretWithCurrentEvidence(run));await CaptureForVerificationAsync("-geo-light");RootGrid.RequestedTheme=originalTheme;
     }
 }
+

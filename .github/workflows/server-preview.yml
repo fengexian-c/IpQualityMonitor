@@ -8,6 +8,8 @@ on:
       - 'tests/IpQualityMonitor.Server.Tests/**'
       - 'tests/server/**'
       - 'tools/mtr/**'
+      - 'tools/NextTraceGeoHelper/**'
+      - 'docs/NEXTTRACE-DOCKER.md'
       - 'deploy/**'
       - 'README.md'
       - 'docs/DOCKER-BRIDGE-PREVIEW.md'
@@ -21,6 +23,8 @@ on:
       - 'tests/IpQualityMonitor.Server.Tests/**'
       - 'tests/server/**'
       - 'tools/mtr/**'
+      - 'tools/NextTraceGeoHelper/**'
+      - 'docs/NEXTTRACE-DOCKER.md'
       - 'deploy/**'
       - 'README.md'
       - 'docs/DOCKER-BRIDGE-PREVIEW.md'
@@ -61,3 +65,4 @@ jobs:
           export NODE_PATH="$RUNNER_TEMP/iqm-browser/node_modules"
           IQM_BROWSER_SMOKE=1 bash tests/server/smoke-container.sh
 # Build/test only: no credentials, registry publication, or deployment.
+

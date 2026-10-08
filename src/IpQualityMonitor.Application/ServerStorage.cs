@@ -6,6 +6,7 @@ namespace IpQualityMonitor.Application;
 public sealed record ServerConfiguration(int SchemaVersion, long Revision, GlobalMonitorSettings Monitoring,
     List<TargetProfile> Profiles)
 {
+    public AnnotationSettings Annotations { get; init; } = new();
     public static ServerConfiguration Empty => new(1, 0, new(), new());
     public ServerConfiguration Copy() => this with { Profiles = Profiles.Select(p => p.Copy()).ToList() };
     public void Validate()
@@ -14,6 +15,7 @@ public sealed record ServerConfiguration(int SchemaVersion, long Revision, Globa
         if (Monitoring is null || Profiles is null || Profiles.Count > 20)
             throw new InvalidDataException("预览版最多支持 20 个目标。");
         Monitoring.Validate();
+        (Annotations ?? throw new InvalidDataException("定位配置无效。")).Validate();
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (var p in Profiles)
         {
@@ -99,3 +101,4 @@ public sealed class ServerStorage : IDisposable
     }
     public void Dispose() => _lease.Dispose();
 }
+

@@ -55,7 +55,7 @@ class MockApi {
     this.authenticated = authenticated;
     this.requests = [];
     this.holds = [];
-    this.state = { site: { id: 'browser-site-id', name: 'Browser fixture' }, config: { revision: 1, monitoring: clone(policy) },
+    this.state = { site: { id: 'browser-site-id', name: 'Browser fixture' }, config: { revision: 1, monitoring: clone(policy), annotations: { mode: 'offline', refreshHours: 24 } },
       targets: [profile('target-a', 'Alpha', 'Both'), profile('target-b', 'Beta', 'Tcp')]
         .map(profile => ({ profile, running: false, primary: null, secondary: null })),
       serverTime: now, timeZone: 'Asia/Shanghai', error: null, analysisError: null, probeError: null };
@@ -86,6 +86,10 @@ class MockApi {
       this.state.config.revision++;
       return [200, { id }];
     }
+    if (pathname === '/api/annotations/settings' && method === 'PUT') {
+      if (body.revision !== this.state.config.revision) return [409, {error: 'Stale revision'}];
+      this.state.config.annotations = clone(body.settings); this.state.config.revision++; return [204];
+    }
     if (pathname === '/api/settings' && method === 'PUT') {
       this.state.config.monitoring = clone(body.monitoring); this.state.config.revision++;
       return [204];
@@ -94,9 +98,13 @@ class MockApi {
     if (target) {
       const [, id, action] = target;
       if (action === 'timeline') return [200, timeline(id)];
-      if (action === 'routes') return [200, [{ id: 'route-' + id, started: now, outcome: 'Completed',
+      if (action === 'routes') return [200, [{ id: 'route-' + id, started: now, finished: now, outcome: 'Completed',
         contextDescription: 'Fixture loopback', probes: [{ ttl: 1, status: 0, address: '127.0.0.1', rttMs: 1.25 },
           { ttl: 2, status: 11010, address: null, rttMs: null }, { ttl: 3, status: 11013, address: '127.0.0.2', rttMs: 2.5 }] }]];
+      if (action === 'annotations') return [200, [{ routeId: 'route-' + id, measuredAt: now, annotatedAt: now, firstAnnotatedAt: now, state: 'stale', nodes: [
+        { ttl: 1, address: '127.0.0.1', region: '<img src=x onerror=alert(1)>', asn: 64500, organization: '<script>evil()</script>', source: 'mock', queriedAt: now, state: 'stale' },
+        { ttl: 3, address: '127.0.0.2', region: 'Second region', asn: 64501, organization: 'Other organization', source: 'mock', queriedAt: now, state: 'cached' }
+      ] }]];
       if (action === 'events') return [200, [{ time: now, kind: 'Fixture', detail: 'Event for ' + id }]];
       if (action === 'route') return [202];
       if (action === 'run') {
@@ -244,6 +252,29 @@ async function main() {
       assert.ok((await page.locator('#targets').textContent()).includes('<img src=x onerror=alert(1)>'));
     });
 
+    await test('annotation provenance and source text stay inert', async ({ page, mock }) => {
+      await page.getByRole('button', { name: 'Alpha', exact: true }).click();
+      await textIncludes(page, '#route-hops', '<img src=x onerror=alert(1)>');
+      await textIncludes(page, '#route-hops', '<script>evil()</script>');
+      assert.equal(await page.locator('#route-hops img, #route-hops script').count(), 0);
+      await textIncludes(page, '#route-info', '首次解释');
+      await textIncludes(page, '#route-info', '测量');
+      assert.equal(mock.count('PUT', '/api/annotations/settings'), 0, 'Viewing never enables online mode');
+    });
+    await test('annotation settings duplicate and stale revision', async ({ page, mock }) => {
+      await page.getByText('NextTrace 定位注释（默认离线）', {exact: true}).click();
+      await page.locator('#annotation-mode').selectOption('v3');
+      const gate = mock.hold('PUT', '/api/annotations/settings');
+      await doubleSubmit(page, '#annotation-form'); await waitForGate(gate); await sleep(100);
+      assert.equal(mock.count('PUT', '/api/annotations/settings'), 1);
+      gate.release(); await eventually(() => mock.state.config.annotations.mode === 'v3', 'Mode saved');
+      await eventually(async () => !(await page.locator('#annotation-form button').isDisabled()), 'Save finished');
+      await page.locator('#annotation-mode').selectOption('offline');
+      mock.state.config.revision++;
+      await page.locator('#annotation-form button').click();
+      await textIncludes(page, '#message', 'Stale revision');
+      assert.equal(mock.state.config.annotations.mode, 'v3');
+    });
     await test('settings native validation and repeated save', async ({ page, mock }) => {
       // The closed form is already populated by the initial overview. Waiting for
       // its value alone does not wait for the queued <details> toggle handler, which
@@ -454,3 +485,4 @@ async function main() {
   }
 }
 main().catch(error => { console.error(error.stack || error.message); process.exitCode = 1; });
+

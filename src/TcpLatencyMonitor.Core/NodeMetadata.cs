@@ -34,10 +34,12 @@ public sealed partial class NodeMetadataClient : IDisposable
     private readonly History _history;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _gate=new(1,1);
+    private readonly object _configurationSync=new();
 
-    public NodeMetadataClient(History history,HttpMessageHandler? handler=null,INextTraceLookup? nextTrace=null)
+    public NodeMetadataClient(History history,HttpMessageHandler? handler=null,INextTraceLookup? nextTrace=null,NextTraceProviderPolicy? nextTracePolicy=null)
     {
         _history=history;
+        _nextTracePolicy=ValidateNextTracePolicy(nextTracePolicy??new());
         _nextTrace=nextTrace??new NextTraceProcessClient(Path.Combine(AppContext.BaseDirectory,"NextTraceGeoHelper.exe"));
         _http=new HttpClient(handler??new HttpClientHandler{AllowAutoRedirect=false})
         {Timeout=TimeSpan.FromSeconds(6),MaxResponseContentBufferSize=65536};
@@ -75,34 +77,60 @@ public sealed partial class NodeMetadataClient : IDisposable
     public MetadataOptions Options=>Volatile.Read(ref _options);
     public void Configure(MetadataOptions options)
     {
+        lock(_configurationSync)ConfigureCore(options,_nextTracePolicy);
+    }
+    public void Configure(MetadataOptions options,NextTraceProviderPolicy policy)
+    {
+        lock(_configurationSync)ConfigureCore(options,ValidateNextTracePolicy(policy));
+    }
+    private void ConfigureCore(MetadataOptions options,NextTraceProviderPolicy policy)
+    {
         if(options.Primary is not ("ipwho.is" or "ipinfo-core" or "nexttrace"))throw new ArgumentException("不支持的数据源。");
         if((options.Primary=="ipinfo-core"||options.CrossCheck&&options.Primary=="ipwho.is")&&string.IsNullOrWhiteSpace(options.IpinfoToken))throw new ArgumentException("请先配置 IPinfo 城市接口 Token。");
         if(options.IpinfoToken.Length>1024||options.IpinfoToken.Any(char.IsControl))throw new ArgumentException("Token 格式无效。");
         if(options.NextTraceToken.Length>4096||options.NextTraceToken.Any(char.IsControl))throw new ArgumentException("NextTrace Token 格式无效。");
         if(options.RefreshHours is <1 or >168)throw new ArgumentException("缓存刷新间隔须为 1–168 小时。");
-        _history.MetadataPreference=options.Primary;Volatile.Write(ref _options,options);
+        if(policy.Mode!="legacy"&&options.Primary!="nexttrace")throw new ArgumentException("严格模式仅支持 NextTrace 数据源。");
+        if((policy.Mode is "v3" or "offline")&&options.NextTraceToken.Length>0)throw new ArgumentException("仅 v4 模式可以配置 NextTrace Token。");
+        _history.MetadataPreference=options.Primary;Volatile.Write(ref _options,options);Volatile.Write(ref _nextTracePolicy,policy);
+        Volatile.Write(ref _metadataPersistenceFailed,0);
     }
     public async Task<NodeMetadata> GetAsync(string address,bool allowNetwork,CancellationToken token)
     {
         var now=DateTimeOffset.UtcNow;
         if(LocalLabel(address) is string local)return Failure(address,now,local);
         address=CidrBlock.Normalize(address);
-        await _gate.WaitAsync(token).ConfigureAwait(false);
+        Interlocked.Increment(ref _pendingMetadata);
+        _queuedAddresses.AddOrUpdate(address,1,(_,count)=>count+1);
+        bool admitted=false;
         try
         {
+            await _gate.WaitAsync(token).ConfigureAwait(false);admitted=true;
             if(!allowNetwork)return _history.LoadNodeMetadata(address)??Failure(address,now,"在线注释未开启");
-            var options=Options;
-            if(options.Primary=="nexttrace")await QueryNextTraceAsync(address,options,token).ConfigureAwait(false);
+            MetadataOptions options;NextTraceProviderPolicy policy;
+            lock(_configurationSync){options=_options;policy=_nextTracePolicy;}
+            if(options.Primary=="nexttrace")
+            {
+                if(policy.Mode=="legacy")await QueryNextTraceAsync(address,options,token).ConfigureAwait(false);
+                else await QueryStrictNextTraceAsync(address,options,policy,token).ConfigureAwait(false);
+            }
             else await QueryProviderAsync(address,options.Primary,options,token).ConfigureAwait(false);
             var main=_history.LoadProviderMetadata(address,options.Primary);
             string secondary=options.Primary=="ipwho.is"?"ipinfo-core":"ipwho.is";
             bool available=secondary=="ipwho.is"||options.IpinfoToken.Length>0;
-            if(available&&(options.CrossCheck||options.Primary!="nexttrace"&&(main is not {Success:true}||main.City.Length==0||main.Expires<=DateTimeOffset.UtcNow)))
+            if(policy.Mode=="legacy"&&available&&(options.CrossCheck||options.Primary!="nexttrace"&&(main is not {Success:true}||main.City.Length==0||main.Expires<=DateTimeOffset.UtcNow)))
                 await QueryProviderAsync(address,secondary,options,token).ConfigureAwait(false);
-            _history.RefreshCombinedMetadata(address);
+            bool combined=_history.RefreshCombinedMetadata(address);
+            if(policy.Mode!="legacy")RequireMetadataWrite(combined);
             return _history.LoadNodeMetadata(address)??Failure(address,now,"查询暂无结果");
         }
-        finally{_gate.Release();}
+        finally
+        {
+            Interlocked.Decrement(ref _pendingMetadata);
+            int remaining=_queuedAddresses.AddOrUpdate(address,0,(_,count)=>Math.Max(0,count-1));
+            if(remaining==0)((ICollection<KeyValuePair<string,int>>)_queuedAddresses).Remove(new(address,0));
+            if(admitted)_gate.Release();
+        }
     }
     private readonly Dictionary<string,DateTimeOffset> _providerNext=new();
     private async Task QueryProviderAsync(string address,string provider,MetadataOptions options,CancellationToken token)
@@ -180,3 +208,4 @@ public sealed partial class NodeMetadataClient : IDisposable
     public static bool IsFresh(NodeMetadata? value,MetadataOptions options,DateTimeOffset now)=>value is {Success:true}&&value.Expires>now&&value.Queried.AddHours(options.RefreshHours)>now;
     public void Dispose(){_http.Dispose();_nextTrace.Dispose();} // The gate may still be released by a cancelled UI request.
 }
+

@@ -2,7 +2,7 @@ const $ = id => document.getElementById(id);
 let csrf = '', snapshot = null, selected = localStorage.getItem('iqm.target') || '', overviewBusy = false;
 let overviewTimer = null, detailTimer = null, overviewController = null, detailController = null, routes = [];
 let sessionEpoch = 0;
-let settingsDirty = false;
+let settingsDirty = false, annotationsDirty = false, annotationViews = [];
 const targetMutations = new Set();
 const message = text => { $('message').textContent = text || ''; };
 async function api(path, options = {}) {
@@ -25,7 +25,7 @@ function stopPolling() {
   detailController?.abort(); detailController = null;
 }
 function clearDetail() {
-  detailController?.abort(); routes = [];
+  detailController?.abort(); routes = []; annotationViews = [];
   for (const id of ['chart', 'hours', 'route-list', 'route-hops', 'events']) $(id).replaceChildren();
   for (const id of ['totals', 'window', 'route-info']) $(id).textContent = '';
 }
@@ -34,7 +34,7 @@ function showLogin() {
   $('targets').replaceChildren();
   for (const id of ['site-name', 'site-info', 'health', 'target-count', 'detail-name']) $(id).textContent = '';
   $('health').hidden = true;
-  settingsDirty = false; $('settings').open = false; $('settings-form').reset();
+  settingsDirty = false; annotationsDirty = false; $('settings').open = false; $('settings-form').reset();
   delete $('settings-form').dataset.revision;
   $('login').hidden = false; $('workspace').hidden = true; $('logout').hidden = true;
 }
@@ -83,9 +83,15 @@ async function refreshOverview() {
     const next = await api('/overview', { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
     if (epoch !== sessionEpoch || controller.signal.aborted || $('workspace').hidden) return;
     snapshot = next;
+    if (!annotationsDirty) {
+      $('annotation-mode').value = snapshot.config.annotations?.mode || 'offline';
+      $('annotation-hours').value = snapshot.config.annotations?.refreshHours || 24;
+      $('annotation-form').dataset.revision = snapshot.config.revision;
+    }
+    $('annotation-status').textContent = snapshot.annotationProvider?.message || '离线注释：不会发出定位请求';
     $('site-name').textContent = snapshot.site.name;
     $('site-info').textContent = `采集点 ${snapshot.site.id.slice(0, 8)} · ${snapshot.timeZone} · ${format(snapshot.serverTime)}`;
-    const errors = [snapshot.error, snapshot.analysisError, snapshot.probeError].filter(Boolean);
+    const errors = [snapshot.error, snapshot.analysisError, snapshot.probeError, snapshot.annotationError].filter(Boolean);
     $('health').hidden = !errors.length; $('health').textContent = errors.join('；');
     $('target-count').textContent = `${snapshot.targets.length} / 20 个目标`;
     $('empty').hidden = snapshot.targets.length > 0;
@@ -174,12 +180,13 @@ async function refreshDetail() {
   detailController?.abort(); detailController = new AbortController();
   const signal = AbortSignal.any([detailController.signal, AbortSignal.timeout(15000)]), id = selected;
   try {
-    const [data, routeData, events] = await Promise.all([
+    const [data, routeData, events, annotations] = await Promise.all([
       api(`/targets/${id}/timeline?protocol=${$('protocol').value}&days=${$('days').value}`, { signal }),
-      api(`/targets/${id}/routes`, { signal }), api(`/targets/${id}/events`, { signal })]);
+      api(`/targets/${id}/routes`, { signal }), api(`/targets/${id}/events`, { signal }),
+      api(`/targets/${id}/annotations`, { signal })]);
     if (id !== selected || signal.aborted) return;
     $('detail').hidden = false; $('detail-name').textContent = snapshot.targets.find(x => x.profile.id === id)?.profile.name || snapshot.targets.find(x => x.profile.id === id)?.profile.address || id;
-    drawTimeline(data.timeline); const previous = $('route-list').value; routes = routeData;
+    drawTimeline(data.timeline); const previous = $('route-list').value; routes = routeData; annotationViews = annotations;
     $('route-list').replaceChildren(...routes.map(r => { const el = document.createElement('option'); el.value = r.id; el.textContent = `${format(r.started)} · ${r.outcome}`; return el; }));
     if (routes.some(r => r.id === previous)) $('route-list').value = previous;
     showRoute(); $('events').replaceChildren(...events.map(e => { const p = document.createElement('p'); p.textContent = `${format(e.time)} · ${e.kind} · ${e.detail}`; return p; }));
@@ -188,13 +195,20 @@ async function refreshDetail() {
 function showRoute() {
   const run = routes.find(r => r.id === $('route-list').value); $('route-hops').replaceChildren();
   if (!run) { $('route-info').textContent = '尚无路由。启用路由并开始监测后，结果将自动保存。'; return; }
-  $('route-info').textContent = `${run.contextDescription || run.context} · ${run.outcome} · ${run.supplementOutcome || ''}`;
+  const annotation = annotationViews.find(a => a.routeId === run.id);
+  const labels = { pending: '等待注释', partial: '部分完成', stale: '含过期缓存', offline: '离线', complete: '已解释', cached: '缓存', local: '本地／保留地址', failed: '查询失败', timeout: '查询超时', 'rate-limited': '服务限流', 'authentication-blocked': '凭证被拒绝', canceled: '查询已取消' };
+  $('route-info').textContent = `${run.contextDescription || run.context} · ${run.outcome} · ${run.supplementOutcome || ''} · 测量 ${format(run.finished)} · ${labels[annotation?.state] || '等待注释'}${annotation?.annotatedAt ? ` · 首次解释 ${format(annotation.firstAnnotatedAt)} · 最新解释 ${format(annotation.annotatedAt)}` : ''}`;
   const groups = new Map(); for (const p of run.probes) { if (!groups.has(p.ttl)) groups.set(p.ttl, []); groups.get(p.ttl).push(p); }
   for (const [ttl, probes] of [...groups].sort((a,b) => a[0]-b[0])) {
     const replies = probes.filter(p => p.status === 0 || p.status === 11013), timeouts = probes.filter(p => p.status === 11010).length;
     const row = document.createElement('tr'); cell(row, ttl); cell(row, [...new Set(replies.map(p => p.address))].join(' / ') || '—');
     cell(row, `${replies.length}/${probes.length}`); cell(row, `${timeouts} / ${probes.length-timeouts-replies.length}`);
-    const rtts = replies.map(p => p.rttMs).filter(Number.isFinite); cell(row, number(rtts.length ? rtts.reduce((a,b) => a+b,0)/rtts.length : null) + ' ms'); $('route-hops').append(row);
+    const rtts = replies.map(p => p.rttMs).filter(Number.isFinite); cell(row, number(rtts.length ? rtts.reduce((a,b) => a+b,0)/rtts.length : null) + ' ms');
+    const nodes = (annotation?.nodes || []).filter(n => n.ttl === ttl);
+    cell(row, nodes.map(n => `${n.address}: ${n.region || '未知'}`).join('\n') || '等待注释');
+    cell(row, nodes.map(n => `${n.address}: ${n.asn ? `AS${n.asn}` : 'ASN 未知'} ${n.organization}`).join('\n') || '—');
+    cell(row, nodes.map(n => `${n.address}: ${n.source || '本地'} · ${labels[n.state] || n.state} · 最近尝试 ${labels[n.attemptState] || n.attemptState || '未尝试'}${n.lastAttemptAt ? ` ${format(n.lastAttemptAt)}` : ''}${n.queriedAt ? ` · 查询 ${format(n.queriedAt)}` : ''}`).join('\n') || '—');
+    $('route-hops').append(row);
   }
 }
 $('login-form').addEventListener('submit', async event => { event.preventDefault(); const submit = event.target.querySelector('button'); if (submit.disabled) return; submit.disabled = true;
@@ -240,3 +254,23 @@ window.addEventListener('pageshow', async event => {
   catch (e) { message(e.message); showLogin(); }
 });
 try { const session = await api('/auth/session'); if (session.authenticated) await showWorkspace(); else showLogin(); } catch (e) { message(e.message); showLogin(); }
+
+
+$('annotation-form').addEventListener('input', () => { annotationsDirty = true; });
+$('annotation-form').addEventListener('change', () => { annotationsDirty = true; });
+$('annotation-form').addEventListener('submit', event => {
+  event.preventDefault(); const form = event.target;
+  perform(form.querySelector('button'), async current => {
+    await api('/annotations/settings', { method: 'PUT', body: {
+      revision: Number(form.dataset.revision), settings: { mode: $('annotation-mode').value, refreshHours: Number($('annotation-hours').value) }
+    } });
+    if (!current()) return;
+    annotationsDirty = false; message('定位设置已保存。关闭后不再启动新查询；已发出的请求无法撤回。');
+    await refreshOverview(); await refreshDetail();
+  });
+});
+
+$('annotation-reset-auth').addEventListener('click', () => perform($('annotation-reset-auth'), async current => {
+  await api('/annotations/reset-auth', { method: 'POST', body: { revision: snapshot.config.revision } });
+  if (current()) { message('已重置当前模式的鉴权阻止；每日预算和服务限流保留。'); await refreshOverview(); }
+}));

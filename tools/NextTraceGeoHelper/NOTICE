@@ -1,0 +1,22 @@
+NextTrace GeoIP helper for IpQualityMonitor
+
+The helper and NTrace-core are licensed under GPL-3.0-only. The installed
+nexttrace-LICENSE is the upstream GPLv3 license text. NTrace-core v1.7.3 is
+pinned at 40ac803ca233b0bc3d4b3bf1cacc8f7e0d8368f2. It is used only for GeoIP;
+this executable performs no route probing and requires no raw-socket capability.
+
+Linux builds apply the documented patch_linux.py to a temporary copy: bounded
+PoW response/challenge sizes, cancellation, no HTTP redirects, single-attempt
+authentication and safe status/Retry-After reporting. Original upstream files
+and the original powclient v0.3.0 archive remain unchanged in the source bundle.
+
+Complete corresponding source, dependency source ZIPs with their original
+licenses, build scripts and build information are installed beside this notice
+under /usr/share/doc/ipqualitymonitor/. Extract nexttrace-source.tar.gz and run
+build-linux.sh using the verified Go 1.26.5 linux/amd64 toolchain described in
+provenance.json. Go is needed only to rebuild, not to run the installed helper. The Go runtime
+is covered by the separately installed nexttrace-Go-LICENSE (BSD-style).
+
+The helper does not acquire service rights. Use of the NextTrace APIs remains
+subject to the provider's authorization, quotas and service terms. API v4
+credentials are supplied over private stdin and are never packaged or logged.

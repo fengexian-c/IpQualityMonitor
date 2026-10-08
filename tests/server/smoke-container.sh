@@ -20,6 +20,11 @@ test "$(docker exec "$name" id -u)" = 10001
 # The web process has no effective capabilities; only the packet helper receives NET_RAW.
 docker exec "$name" sh -c "grep '^CapEff:[[:space:]]*0000000000000000$' /proc/1/status"
 docker exec "$name" getcap /usr/local/libexec/iqm-mtr-packet | grep -q cap_net_raw
+test -z "$(docker exec "$name" getcap /usr/local/libexec/iqm-nexttrace-geo)"
+# Run the actual static helper as UID 10001; only reserved/private inputs, no provider connection.
+printf '%s\n' '{"id":"private","op":"lookup","ips":["127.0.0.1","10.0.0.1","2001:db8::1"]}' '{"id":"stats","op":"stats"}' '{"id":"stop","op":"shutdown"}' | \
+  docker exec -i "$name" /usr/local/libexec/iqm-nexttrace-geo --live --lifetime=5s | \
+  python3 -c 'import json,sys; frames=[json.loads(s) for s in sys.stdin]; stats=next(f for f in frames if f["type"]=="stats"); assert stats["queries"]==0 and stats["connections"]==0; assert frames[-1]["status"]=="shutdown"'
 port=$(docker port "$name" 8080/tcp | head -1 | sed 's/.*://')
 printf 'Checking published loopback port %s\n' "$port"
 sudo python3 tests/server/smoke_http.py --url "http://127.0.0.1:$port" --password-file "$root/password"
@@ -46,3 +51,4 @@ printf '%s\n' 'PASS stable dataset identity after restart'
 
 # Real container lifecycle cases use only freshly created labeled named volumes.
 python3 tests/server/auth_lifecycle.py
+

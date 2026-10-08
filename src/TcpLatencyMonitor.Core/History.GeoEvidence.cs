@@ -6,7 +6,7 @@ namespace TcpLatencyMonitor.Core;
 public sealed partial class History
 {
     public string MetadataPreference {get;set;}="ipwho.is";
-    public void RefreshCombinedMetadata(string ip)=>Write(db=>RebuildMetadata(db,CidrBlock.Normalize(ip)));
+    public bool RefreshCombinedMetadata(string ip)=>TryWriteOptional(db=>RebuildMetadata(db,CidrBlock.Normalize(ip)));
     public void ResetProviderFailures(string provider)
     {
         Write(db=>
@@ -54,6 +54,17 @@ public sealed partial class History
         cmd.Parameters.AddWithValue("$ip",CidrBlock.Normalize(address));cmd.Parameters.AddWithValue("$provider",provider);
         return cmd.ExecuteScalar() is string json?JsonSerializer.Deserialize(json,DataJson.Default.NodeMetadata):null;
     }
+    private static void ValidateMetadataEvidence(NodeMetadata? data)
+    {
+        if(data is null||!System.Net.IPAddress.TryParse(data.Address,out _)||data.Isp is null||data.Organization is null||
+            data.Country is null||data.Region is null||data.City is null||data.Message is null)
+            throw new JsonException("节点定位证据缺少有效地址或必需字段。");
+    }
+    private static NodeMetadata ReadMetadataEvidence(string json)
+    {
+        var data=JsonSerializer.Deserialize(json,DataJson.Default.NodeMetadata);
+        ValidateMetadataEvidence(data);return data!;
+    }
     private void RebuildMetadata(SqliteConnection db,string address)
     {
         address=CidrBlock.Normalize(address);var sources=new List<NodeMetadata>();
@@ -62,8 +73,8 @@ public sealed partial class History
             cmd.CommandText="SELECT success_json,attempt_json FROM geo_observation WHERE address=$ip ORDER BY provider";cmd.Parameters.AddWithValue("$ip",address);
             using var reader=cmd.ExecuteReader();while(reader.Read())
             {
-                var attempt=JsonSerializer.Deserialize(reader.GetString(1),DataJson.Default.NodeMetadata)!;
-                var good=reader.IsDBNull(0)?attempt:JsonSerializer.Deserialize(reader.GetString(0),DataJson.Default.NodeMetadata)!;
+                var attempt=ReadMetadataEvidence(reader.GetString(1));
+                var good=reader.IsDBNull(0)?attempt:ReadMetadataEvidence(reader.GetString(0));
                 sources.Add(good with{QueryState=good.QueryState+(attempt.Success?"":$" · 最近查询 {attempt.Queried.ToLocalTime():MM-dd HH:mm}：{attempt.Message}")});
             }
         }
@@ -99,7 +110,7 @@ public sealed partial class History
             cmd.Parameters.AddWithValue("$ip",ip);cmd.Parameters.AddWithValue("$time",DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());cmd.ExecuteNonQuery();RebuildMetadata(db,ip);
         });
     }
-    public RouteAnnotation ReinterpretWithCurrentEvidence(RouteRun route)
+    public RouteAnnotation? ReinterpretWithCurrentEvidence(RouteRun route)
     {
         var metadata=new Dictionary<string,NodeMetadata>();
         foreach(string ip in route.Probes.Where(p=>p.Address is not null).Select(p=>CidrBlock.Normalize(p.Address!)).Distinct())
@@ -120,3 +131,4 @@ public sealed partial class History
         using var reader=cmd.ExecuteReader();var result=new List<NextTraceImport>();while(reader.Read())result.Add(JsonSerializer.Deserialize(reader.GetString(0),DataJson.Default.NextTraceImport)!);return result;
     }
 }
+

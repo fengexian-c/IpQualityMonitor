@@ -124,88 +124,144 @@ public static class RouteClassifier
     }
 }
 
-// One worker, bounded jobs, and a shared client: no HTTP work runs on the probe writer or UI thread.
-public sealed class RouteAnnotationService: IAsyncDisposable
+// The database is the recovery source; the bounded queue is only a fast notification path.
+public sealed class RouteAnnotationService : IAsyncDisposable
 {
-    private sealed record Job(RouteRun Route,bool Viewed,TaskCompletionSource<RouteAnnotation?> Completion,string Key,int Generation);
-    private readonly History _history;private readonly NodeMetadataClient _client;
-    private readonly Channel<Job> _queue=Channel.CreateBounded<Job>(128);
+    private sealed record Job(RouteRun Route, bool Viewed, TaskCompletionSource<RouteAnnotation?> Completion, int Generation);
+    private readonly History _history;
+    private readonly NodeMetadataClient _client;
+    private readonly Channel<Job> _queue;
+    private readonly Dictionary<string, Job> _pending = new();
+    private readonly object _sync = new();
+    private readonly object _pendingSync = new();
+    private readonly CancellationTokenSource _stop = new();
+    private CancellationTokenSource? _active, _maintenanceActive;
+    private readonly Task _worker, _maintenance;
     private readonly int _budgetMilliseconds;
-    private readonly Dictionary<string,Task<RouteAnnotation?>> _pending=new();private readonly object _sync=new();
-    private readonly CancellationTokenSource _stop=new();private CancellationTokenSource? _active;
-    private readonly Task _worker,_maintenance;private int _mode,_generation;
-    private CancellationTokenSource? _maintenanceActive;
+    private readonly Func<IReadOnlyCollection<string>?>? _targetKeys;
+    private int _mode, _generation, _recoveryOffset;
+    private volatile bool _closed;
     public event Action? Refreshed;
     public event Action<RouteAnnotation>? Saved;
     public event Action<string>? Failed;
-    public RouteAnnotationService(History history,NodeMetadataClient client,int budgetMilliseconds=20000)
-    {if(budgetMilliseconds is <50 or >20000)throw new ArgumentOutOfRangeException(nameof(budgetMilliseconds));_history=history;_client=client;_budgetMilliseconds=budgetMilliseconds;_worker=Task.Run(WorkAsync);_maintenance=Task.Run(MaintainAsync);}
-    public int Mode {get=>Volatile.Read(ref _mode);set{lock(_sync){Volatile.Write(ref _mode,Math.Clamp(value,0,2));CancelRequests();}}}
-    public void CancelRequests(){lock(_sync){Interlocked.Increment(ref _generation);_active?.Cancel();_maintenanceActive?.Cancel();}}
+    public RouteAnnotationService(History history, NodeMetadataClient client, int budgetMilliseconds = 20000,
+        Func<IReadOnlyCollection<string>?>? targetKeys = null, int queueCapacity = 128)
+    {
+        if (budgetMilliseconds is <50 or >20000) throw new ArgumentOutOfRangeException(nameof(budgetMilliseconds));
+        _history = history; _client = client; _budgetMilliseconds = budgetMilliseconds; _targetKeys = targetKeys;
+        _queue = Channel.CreateBounded<Job>(new BoundedChannelOptions(Math.Clamp(queueCapacity, 1, 128))
+            { SingleReader = true, FullMode = BoundedChannelFullMode.Wait });
+        _worker = Task.Run(WorkAsync); _maintenance = Task.Run(MaintainAsync);
+    }
+    public int Mode { get => Volatile.Read(ref _mode); set { lock (_sync) { _mode = Math.Clamp(value, 0, 2); CancelRequests(); } } }
+    public void CancelRequests() { lock (_sync) { _generation++; _active?.Cancel(); _maintenanceActive?.Cancel(); } }
+    public Task<RouteAnnotation?> Request(RouteRun route, bool viewed)
+    {
+        lock (_pendingSync)
+        {
+            if (_closed) return Task.FromResult<RouteAnnotation?>(null);
+            int generation = Volatile.Read(ref _generation);
+            if (_pending.TryGetValue(route.Id, out var old) && old.Generation == generation) return old.Completion.Task;
+            var job = new Job(route, viewed, new(TaskCreationOptions.RunContinuationsAsynchronously), generation);
+            if (!_queue.Writer.TryWrite(job)) return Task.FromResult<RouteAnnotation?>(null);
+            _pending[route.Id] = job; return job.Completion.Task;
+        }
+    }
+    // Startup and periodic bounded recovery also recover crashes between raw commit and event delivery.
+    public void RecoverRecent()
+    {
+        if (_stop.IsCancellationRequested) return;
+        var candidates = _history.LoadRoutesNeedingAnnotation(DateTimeOffset.UtcNow,
+            targetKeys: _targetKeys?.Invoke() ?? Array.Empty<string>(), includeIncomplete: Mode != 0, limit: 512, refreshHours: _client.Options.RefreshHours);
+        if (candidates.Count == 0) return;
+        int start = Math.Abs(Interlocked.Add(ref _recoveryOffset, 127) % candidates.Count);
+        for (int n = 0; n < candidates.Count; n++) _ = Request(candidates[(start + n) % candidates.Count], false);
+    }
     private async Task MaintainAsync()
     {
         try
         {
-            while(!_stop.IsCancellationRequested)
+            while (!_stop.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromSeconds(30),_stop.Token).ConfigureAwait(false);
-                if(Mode!=2)continue;
-                using var budget=CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);budget.CancelAfter(TimeSpan.FromSeconds(20));
-                lock(_sync){if(Mode!=2)continue;_maintenanceActive=budget;}
-                bool changed=false;
-                try{changed=await _client.RefreshRecentAsync(budget.Token).ConfigureAwait(false)>0;}
-                catch(OperationCanceledException){changed=true;}
-                catch(Exception){Failed?.Invoke("后台定位缓存刷新失败；稍后重试");}
-                finally{lock(_sync)_maintenanceActive=null;}
-                if(changed&&!_stop.IsCancellationRequested)Refreshed?.Invoke();
+                try
+                {
+                    RecoverRecent();
+                    // Preserve desktop maintenance behavior; the server uses recovered route jobs only.
+                    if (_targetKeys is null && Mode == 2)
+                    {
+                        using var budget = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+                        budget.CancelAfter(_budgetMilliseconds);
+                        lock (_sync) { if (Mode != 2 || _closed) continue; _maintenanceActive = budget; }
+                        try { if (await _client.RefreshRecentAsync(budget.Token).ConfigureAwait(false) > 0) Refreshed?.Invoke(); }
+                        catch (OperationCanceledException) { }
+                        finally { lock (_sync) _maintenanceActive = null; }
+                    }
+                }
+                catch (Exception) { Failed?.Invoke("定位注释恢复失败；稍后重试"); }
+                await Task.Delay(TimeSpan.FromSeconds(30), _stop.Token).ConfigureAwait(false);
             }
         }
-        catch(OperationCanceledException){}
+        catch (OperationCanceledException) { }
     }
-    public Task<RouteAnnotation?> Request(RouteRun route,bool viewed)
-    {
-        lock(_sync)
-        {
-            string key=route.Id+(viewed?"view":"auto")+_generation;if(_pending.TryGetValue(key,out var old))return old;
-            var completion=new TaskCompletionSource<RouteAnnotation?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if(!_queue.Writer.TryWrite(new(route,viewed,completion,key,_generation))){completion.SetResult(null);return completion.Task;}
-            _pending.Add(key,completion.Task);return completion.Task;
-        }
-    }
+    private bool Current(Job job) => !_closed && job.Generation == _generation;
     private async Task WorkAsync()
     {
-        await foreach(var job in _queue.Reader.ReadAllAsync())
+        await foreach (var job in _queue.Reader.ReadAllAsync())
         {
             try
             {
-                if(_stop.IsCancellationRequested){job.Completion.TrySetResult(null);continue;}
-                var metadata=new Dictionary<string,NodeMetadata>();var ips=job.Route.Probes.Where(p=>p.Address is not null&&p.Status is 0 or 11013).Select(p=>p.Address!).Distinct().ToArray();
-                foreach(var ip in ips)if(_history.LoadNodeMetadata(ip) is NodeMetadata cache)metadata[ip]=cache;
-                var local=_history.SaveRouteAnnotation(RouteClassifier.Classify(job.Route,metadata,DateTimeOffset.UtcNow,
-                    job.Viewed?"查看时本地解释":DateTimeOffset.UtcNow-job.Route.Finished>TimeSpan.FromSeconds(45)?"后台延后本地解释":"采集时本地注释"));
-                Saved?.Invoke(local);
-                // Waiting behind other targets does not consume this route's lookup budget.
-                using var budget=CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);budget.CancelAfter(_budgetMilliseconds);
-                lock(_sync)_active=budget;
+                lock (_sync) { if (!Current(job)) { job.Completion.TrySetResult(null); continue; } }
+                var ips = job.Route.Probes.Where(p => p.Address is not null && p.Status is 0 or 11013)
+                    .Select(p => p.Address!).Where(ip => IPAddress.TryParse(ip, out _)).Select(CidrBlock.Normalize).Distinct().ToArray();
+                var metadata = new Dictionary<string, NodeMetadata>();
+                foreach (var ip in ips) if (_history.LoadNodeMetadata(ip) is {} cached) metadata[ip] = cached;
+                RouteAnnotation? local;
+                lock (_sync)
+                {
+                    if (!Current(job)) { job.Completion.TrySetResult(null); continue; }
+                    local = _history.SaveRouteAnnotation(RouteClassifier.Classify(job.Route, metadata, DateTimeOffset.UtcNow, "后台本地解释"));
+                    if (local is not null) Saved?.Invoke(local);
+                }
+                if (local is null) { job.Completion.TrySetResult(null); continue; }
+                using var budget = CancellationTokenSource.CreateLinkedTokenSource(_stop.Token);
+                budget.CancelAfter(_budgetMilliseconds);
+                lock (_sync)
+                {
+                    if (!Current(job)) { job.Completion.TrySetResult(null); continue; }
+                    _active = budget;
+                }
                 try
                 {
-                    foreach(var ip in ips)
+                    // One due IP per route slice: rotate targets and least-recently-attempted IPs.
+                    // No second network maintenance worker competes for the same 20-second budget.
+                    var candidates = _targetKeys is null ? ips.AsEnumerable() : _client.OrderNextTraceCandidates(ips)
+                        .Where(ip => _client.NeedsRefresh(ip, DateTimeOffset.UtcNow)).Take(1);
+                    foreach (var candidate in candidates)
                     {
-                        if(NodeMetadataClient.LocalLabel(ip) is not null)continue;
-                        bool online=job.Generation==Volatile.Read(ref _generation)&&!budget.IsCancellationRequested&&(Mode==2||Mode==1&&job.Viewed);
-                        if(!online)break;
-                        metadata[ip]=await _client.GetAsync(ip,true,budget.Token).ConfigureAwait(false);
+                        bool online;
+                        lock (_sync) online = Current(job) && !budget.IsCancellationRequested && (Mode == 2 || Mode == 1 && job.Viewed);
+                        if (!online) break;
+                        metadata[candidate] = await _client.GetAsync(candidate, true, budget.Token).ConfigureAwait(false);
                     }
                 }
-                catch(OperationCanceledException){}
-                finally{lock(_sync)_active=null;}
-                string origin=job.Viewed?"查看时补全":DateTimeOffset.UtcNow-job.Route.Finished>TimeSpan.FromSeconds(45)?"后台延后补全":"采集时注释";
-                var result=RouteClassifier.Classify(job.Route,metadata,DateTimeOffset.UtcNow,origin);
-                var saved=_history.SaveRouteAnnotation(result);job.Completion.TrySetResult(saved);if(saved.Id!=local.Id)Saved?.Invoke(saved);
+                catch (OperationCanceledException) { }
+                finally { lock (_sync) _active = null; }
+                lock (_sync)
+                {
+                    if (!Current(job)) { job.Completion.TrySetResult(null); continue; }
+                    var saved = _history.SaveRouteAnnotation(RouteClassifier.Classify(job.Route, metadata, DateTimeOffset.UtcNow, "后台补全解释"));
+                    job.Completion.TrySetResult(saved);
+                    if (saved is not null && saved.Id != local.Id) Saved?.Invoke(saved);
+                }
+                Refreshed?.Invoke();
             }
-            catch(Exception ex){job.Completion.TrySetResult(null);Failed?.Invoke(ex.Message);}
-            finally{lock(_sync)_pending.Remove(job.Key);}
+            catch (Exception) { job.Completion.TrySetResult(null); Failed?.Invoke("定位注释暂不可用；原始测量保留"); }
+            finally { lock (_pendingSync) if (_pending.TryGetValue(job.Route.Id, out var current) && ReferenceEquals(current, job)) _pending.Remove(job.Route.Id); }
         }
     }
-    public async ValueTask DisposeAsync(){_stop.Cancel();_queue.Writer.TryComplete();await Task.WhenAll(_worker,_maintenance).ConfigureAwait(false);_stop.Dispose();}
+    public async ValueTask DisposeAsync()
+    {
+        lock (_sync) { if (_closed) return; _closed = true; _generation++; _stop.Cancel(); _active?.Cancel(); _maintenanceActive?.Cancel(); _queue.Writer.TryComplete(); }
+        await Task.WhenAll(_worker, _maintenance).ConfigureAwait(false); _stop.Dispose();
+    }
 }

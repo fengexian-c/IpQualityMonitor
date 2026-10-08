@@ -80,9 +80,9 @@ internal static class GeoEvidenceChecks
             check(Reject(()=>h.SetCalibration(manual with{Address="10.0.0.1"}))&&Reject(()=>h.SetCalibration(manual with{Note=""})),"invalid calibration is rejected before entering the writer");
             var endpoint=Target.Parse("186.241.113.4",0,ProbeProtocol.Icmp,1000);
             var run=new RouteRun(Guid.NewGuid().ToString("N"),endpoint.Key,endpoint.Address,"fixture",now,now,"fixture","complete",true,1000,32,[new(10,1,ip,11013,149.6),new(11,1,"218.30.53.210",11013,152)]);
-            h.SaveRoute(run);var original=h.ReinterpretWithCurrentEvidence(run);h.SetCalibration(manual);
-            check(h.CurrentRouteAnnotation(run,now).Id==original.Id,"editing global metadata leaves the original route snapshot frozen until explicit reinterpretation");
-            var revised=h.ReinterpretWithCurrentEvidence(run);
+            h.SaveRoute(run);var original=h.ReinterpretWithCurrentEvidence(run) ?? throw new Exception("Annotation missing");h.SetCalibration(manual);
+            check(h.CurrentRouteAnnotation(run,now)?.Id==original.Id,"editing global metadata leaves the original route snapshot frozen until explicit reinterpretation");
+            var revised=h.ReinterpretWithCurrentEvidence(run) ?? throw new Exception("Annotation missing");
             check(revised.Id!=original.Id&&h.LoadRouteAnnotation(run.Id,true)!.Id==original.Id,"explicit reinterpretation adds a revision and retains earliest evidence");
             await h.RecordAsync(()=>h.SaveNextTraceImport(import));
             check(h.LoadNextTraceImports().Single().Hops[2].RttMs==149.6&&h.Load(endpoint,now).Day.Attempts==0&&h.LoadRoutes(endpoint).Count==1,"import history never creates monitor samples or replaces route runs");
@@ -124,3 +124,4 @@ internal static class GeoEvidenceChecks
     private sealed class Handler(Func<HttpRequestMessage,HttpResponseMessage> response):HttpMessageHandler
     {protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,CancellationToken token)=>Task.FromResult(response(request));}
 }
+

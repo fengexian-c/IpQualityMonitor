@@ -1,0 +1,65 @@
+package wshandle
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/tsosunchia/powclient"
+)
+
+// This source is copied only into the temporary Linux build. All sockets use
+// a loopback fake server; the injected dial function refuses any other target.
+func TestIQMHandshakeStatusAndStoppedEpoch(t *testing.T) {
+	oldToken, oldCached, oldGetToken := envToken, cacheToken, wsGetTokenFn
+	oldDial := websocket.DefaultDialer
+	defer func() {
+		envToken, cacheToken, wsGetTokenFn = oldToken, oldCached, oldGetToken
+		websocket.DefaultDialer = oldDial
+	}()
+	envToken = ""
+	wsGetTokenFn = func(context.Context, string, string, string) (string, error) { return "fixture", nil }
+	for _, code := range []int{302, 401, 403, 429, 503} {
+		cacheToken = ""
+		calls := 0
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			w.Header().Set("Retry-After", "73")
+			w.Header().Set("Location", "/must-not-follow")
+			w.WriteHeader(code)
+			fmt.Fprint(w, "private-provider-error")
+		}))
+		host, port, _ := net.SplitHostPort(server.Listener.Addr().String())
+		dialer := *oldDial
+		dialer.Proxy = nil
+		dialer.NetDialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			if address != server.Listener.Addr().String() {
+				return nil, errors.New("test blocked non-loopback target")
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, address)
+		}
+		websocket.DefaultDialer = &dialer
+		conn := newWsConn(nil, make(chan os.Signal, 1))
+		conn.baseCtx, conn.directIP, conn.apiHost, conn.apiPort, conn.apiFastIP = context.Background(), true, host, port, host
+		conn.recreateWsConn()
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		err := conn.WaitUntilConnected(ctx)
+		cancel()
+		var status *powclient.HTTPStatusError
+		if !errors.As(err, &status) || status.Code != code || status.RetryAfter != "73" || status.Body != "" || calls != 1 {
+			t.Fatalf("status %d: unsafe handshake result status=%v calls=%d", code, status, calls)
+		}
+		if conn.startReconnecting() {
+			t.Fatal("failed epoch allowed automatic reconnect")
+		}
+		conn.Close()
+		server.Close()
+	}
+}

@@ -78,10 +78,10 @@ internal static class LocationChecks
             cmd.Parameters.AddWithValue("$id",cached.Id);cmd.Parameters.AddWithValue("$route",run.Id);cmd.Parameters.AddWithValue("$time",now.ToUnixTimeMilliseconds());cmd.Parameters.AddWithValue("$json",oldJson.ToJsonString());cmd.ExecuteNonQuery();
         }
         history.SaveNodeMetadata(Meta(first,9929,"另一个城市"));
-        var upgraded=history.CurrentRouteAnnotation(run,now.AddSeconds(1));
+        var upgraded=history.CurrentRouteAnnotation(run,now.AddSeconds(1)) ?? throw new Exception("Annotation missing");
         check(upgraded.Summary.Contains("CN2")&&upgraded.LocationSequence.Contains("北京")&&!upgraded.LocationSequence.Contains("另一个城市")&&upgraded.Origin.Contains("重新解释"),"2.1 JSON is reinterpreted offline using frozen historical geography");
         check(history.LoadRouteAnnotation(run.Id,true)!.Summary=="legacy unknown"&&history.LoadRouteAnnotation(run.Id,true)!.IdentityAbsent(),"first annotation remains readable with absent new fields");
-        check(history.CurrentRouteAnnotation(run,now.AddSeconds(2)).Id==upgraded.Id&&history.SaveRouteAnnotation(Classify(run,Meta(first),Meta(second))).Id==upgraded.Id,"reopening or recomputing identical evidence does not create another revision");
+        check(history.CurrentRouteAnnotation(run,now.AddSeconds(2))?.Id==upgraded.Id&&history.SaveRouteAnnotation(Classify(run,Meta(first),Meta(second)))?.Id==upgraded.Id,"reopening or recomputing identical evidence does not create another revision");
         var newCity=Classify(run,Meta(first,null,"上海","上海市"),Meta(second)) with{Time=now.AddSeconds(3)};history.SaveRouteAnnotation(newCity);
         check(history.LoadRouteAnnotation(run.Id)!.Id==newCity.Id&&history.LoadRouteAnnotation(run.Id,true)!.Id==cached.Id,"changed city evidence creates a revision while retaining the original");
         var profile=Target.Parse("8.8.4.4",0,ProbeProtocol.Icmp,500);var exportRun=run with{Id="export-location",TargetKey=profile.Key};history.SaveRoute(exportRun);
@@ -110,3 +110,4 @@ internal static class LocationChecks
         {Calls++;Started.TrySetResult();await Task.Delay(10000,token);return new(HttpStatusCode.OK);}
     }
 }
+
