@@ -18,7 +18,7 @@ if (args.Length == 1 && args[0] == "--healthcheck")
     try
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-        var response = await client.GetAsync("http://127.0.0.1:8080/health/live");
+        var response = await client.GetAsync("http://127.0.0.1:8080/health/ready");
         Environment.ExitCode = response.IsSuccessStatusCode ? 0 : 1;
     }
     catch { Environment.ExitCode = 1; }
@@ -28,11 +28,14 @@ if (!OperatingSystem.IsLinux()) throw new PlatformNotSupportedException("此宿�
 var builder = WebApplication.CreateBuilder(args);
 var data = Path.GetFullPath(builder.Configuration["IPQUALITY_DATA_DIR"] ?? "/data");
 var zone = TimeZoneInfo.FindSystemTimeZoneById(builder.Configuration["IPQUALITY_TIME_ZONE"] ?? "Asia/Shanghai");
-var secureCookies = builder.Configuration["IPQUALITY_SECURE_COOKIES"] == "true";
+var secureCookieSetting = builder.Configuration["IPQUALITY_SECURE_COOKIES"] ?? "false";
+if (!bool.TryParse(secureCookieSetting, out var secureCookies))
+    throw new InvalidOperationException("IPQUALITY_SECURE_COOKIES 必须为 true 或 false。");
 builder.WebHost.UseUrls(builder.Configuration["ASPNETCORE_URLS"] ?? "http://0.0.0.0:8080");
 builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 32768);
 builder.Services.Configure<HostOptions>(o => o.ShutdownTimeout = TimeSpan.FromSeconds(40));
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services.Configure<RouteHandlerOptions>(o => o.ThrowOnBadRequest = true);
 builder.Services.AddDataProtection().SetApplicationName("IpQualityMonitor.Server.v1")
     .PersistKeysToFileSystem(new DirectoryInfo(Path.Combine(data, "keys")));
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
@@ -119,6 +122,7 @@ app.Use(async (context, next) =>
         if (context.Response.HasStarted) throw;
         var status = ex switch
         {
+            BadHttpRequestException requestError => requestError.StatusCode,
             ConfigurationConflictException => 409,
             KeyNotFoundException => 404,
             ArgumentException or AntiforgeryValidationException => 400,
@@ -190,7 +194,7 @@ api.MapGet("/targets/{id}/events", async (string id, MonitorRuntime runtime, Htt
     Results.Ok(await runtime.QueryAsync(h => h.LoadEvents(runtime.RouteTarget(id), 100), context.RequestAborted)));
 await app.RunAsync();
 
-internal sealed record LoginInput(string Password);
-internal sealed record AddTargetInput(long Revision, TargetInput Target);
-internal sealed record RunningInput(long Revision, bool Running);
-internal sealed record PolicyInput(long Revision, GlobalMonitorSettings Monitoring);
+internal sealed record LoginInput([property: JsonRequired] string Password);
+internal sealed record AddTargetInput([property: JsonRequired] long Revision, [property: JsonRequired] TargetInput Target);
+internal sealed record RunningInput([property: JsonRequired] long Revision, [property: JsonRequired] bool Running);
+internal sealed record PolicyInput([property: JsonRequired] long Revision, [property: JsonRequired] GlobalMonitorSettings Monitoring);

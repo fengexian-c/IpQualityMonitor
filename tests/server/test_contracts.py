@@ -29,6 +29,29 @@ class SourceContracts(unittest.TestCase):
         self.assertNotIn('docker.sock', text)
         self.assertIn('NET_RAW', text)
 
+    def test_supported_architecture_and_ci_scope(self):
+        compose = (ROOT / 'deploy/compose.yaml').read_text()
+        self.assertIn('platform: linux/amd64', compose)
+        workflow = (ROOT / '.github/workflows/server-preview.yml').read_text()
+        self.assertIn("'docker/**'", workflow)
+        self.assertNotIn('ubuntu-24.04-arm', workflow)
+        self.assertIn('contents: read', workflow)
+        self.assertNotIn('docker push', workflow)
+        self.assertNotIn('packages: write', workflow)
+
+    def test_runtime_base_images_are_pinned(self):
+        dockerfile = (ROOT / 'deploy/Dockerfile').read_text()
+        bases = re.findall(r'^FROM (\S+)', dockerfile, re.M)
+        for base in bases:
+            if base != 'build':
+                self.assertRegex(base, r'@sha256:[0-9a-f]{64}$')
+
+    def test_privileged_initializer_refuses_symlinks(self):
+        script = (ROOT / 'deploy/init.sh').read_text()
+        self.assertLess(script.index('if [ -L "$path" ]'), script.index('chown 10001:10001 data'))
+        self.assertIn('data secrets secrets/admin_password.txt .env', script)
+        self.assertIn('umask 077', script)
+
     def test_ipv6_is_explicit_optional_override(self):
         text = (ROOT / 'deploy/compose.ipv6.yaml').read_text()
         self.assertIn('enable_ipv6: true', text)

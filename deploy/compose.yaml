@@ -4,6 +4,7 @@ services:
   ipqualitymonitor:
     # Local build, NOT a claim that a prebuilt public image already exists.
     image: ipqualitymonitor:server-preview
+    platform: linux/amd64
     build:
       context: ..
       dockerfile: deploy/Dockerfile

@@ -32,7 +32,8 @@ public static class PacketMapping
         if (reply.Kind is not ("reply" or "ttl-expired" or "icmp-error"))
             return new(ttl, sequence, null, LocalError, null);
         var text = reply.Get(destination.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork ? "ip-4" : "ip-6");
-        if (!IPAddress.TryParse(text, out var ip)) throw new InvalidDataException("回应缺少有效 IP。");
+        if (!IPAddress.TryParse(text, out var ip) || ip.AddressFamily != destination.AddressFamily)
+            throw new InvalidDataException("回应缺少同地址族的有效 IP。");
         int status;
         if (reply.Kind == "icmp-error")
         {
@@ -40,12 +41,26 @@ public static class PacketMapping
             // the neutral class only; never allow an ICMP error to count as an Echo Reply.
             var type = RequiredByte(reply, "icmp-type"); var code = RequiredByte(reply, "icmp-code");
             if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
-                status = type == 3 ? code switch { 0 => 11002, 1 => 11003, 2 => 11004, 3 => 11005, _ => 11003 } : 11050;
-            else status = type == 1 ? 11003 : 11050;
+                status = type switch
+                {
+                    3 => code switch { 0 => 11002, 1 => 11003, 2 => 11004, 3 => 11005, 4 => 11009, _ => 11003 },
+                    11 when code == 1 => 11014,
+                    12 => 11015,
+                    _ => 11050
+                };
+            else status = type switch
+            {
+                1 => code switch { 0 => 11002, 4 => 11005, _ => 11003 },
+                2 => 11009,
+                3 when code == 1 => 11014,
+                4 => 11015,
+                _ => 11050
+            };
             return new(ttl, sequence, ip.ToString(), status, null);
         }
-        if (!double.TryParse(reply.Get("round-trip-time"), NumberStyles.None, CultureInfo.InvariantCulture, out var us) ||
-            !double.IsFinite(us) || us < 0) throw new InvalidDataException("无效的探测 RTT。");
+        // mtr's wire field is an unsigned integer count of microseconds.
+        if (!uint.TryParse(reply.Get("round-trip-time"), NumberStyles.None, CultureInfo.InvariantCulture, out var us))
+            throw new InvalidDataException("无效的探测 RTT。");
         status = reply.Kind == "ttl-expired" ? 11013 : 0;
         return new(ttl, sequence, ip.ToString(), status, us / 1000.0);
     }

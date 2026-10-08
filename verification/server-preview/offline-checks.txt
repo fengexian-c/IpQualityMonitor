@@ -12,9 +12,12 @@ test_password_is_file_not_compose_literal (test_contracts.SourceContracts.test_p
 test_patch_anchor_fails_closed (test_contracts.SourceContracts.test_patch_anchor_fails_closed) ... ok
 test_patch_rejects_unknown_source_before_writing (test_contracts.SourceContracts.test_patch_rejects_unknown_source_before_writing) ... ok
 test_private_transport_limits_and_contract_gate (test_contracts.SourceContracts.test_private_transport_limits_and_contract_gate) ... ok
+test_privileged_initializer_refuses_symlinks (test_contracts.SourceContracts.test_privileged_initializer_refuses_symlinks) ... ok
 test_project_xml_and_dependency_direction (test_contracts.SourceContracts.test_project_xml_and_dependency_direction) ... ok
+test_runtime_base_images_are_pinned (test_contracts.SourceContracts.test_runtime_base_images_are_pinned) ... ok
+test_supported_architecture_and_ci_scope (test_contracts.SourceContracts.test_supported_architecture_and_ci_scope) ... ok
 
 ----------------------------------------------------------------------
-Ran 15 tests in 0.038s
+Ran 18 tests in 0.048s
 
 OK

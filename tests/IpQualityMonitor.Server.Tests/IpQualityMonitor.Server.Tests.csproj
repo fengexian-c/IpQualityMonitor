@@ -3,5 +3,6 @@
   <ItemGroup>
     <ProjectReference Include="../../src/IpQualityMonitor.Application/IpQualityMonitor.Application.csproj" />
     <ProjectReference Include="../../src/IpQualityMonitor.Linux/IpQualityMonitor.Linux.csproj" />
+    <ProjectReference Include="../../src/IpQualityMonitor.Web/IpQualityMonitor.Web.csproj" />
   </ItemGroup>
 </Project>

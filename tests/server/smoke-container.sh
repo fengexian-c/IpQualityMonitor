@@ -2,7 +2,8 @@
 set -euo pipefail
 root=$(mktemp -d)
 name="iqm-smoke-$RANDOM"
-cleanup() { docker logs "$name" 2>&1 || true; docker rm -f "$name" >/dev/null 2>&1 || true; sudo rm -rf "$root"; }
+browser_password=""
+cleanup() { if [ -n "$browser_password" ]; then rm -f "$browser_password"; fi; docker logs "$name" 2>&1 || true; docker rm -f "$name" >/dev/null 2>&1 || true; sudo rm -rf "$root"; }
 trap cleanup EXIT
 mkdir -p "$root/data"
 printf '%s\n' 'smoke-test-only-not-a-production-password' > "$root/password"
@@ -15,14 +16,26 @@ docker run -d --name "$name" --network bridge --init \
   -v "$root/data:/data" -v "$root/password:/run/secrets/admin_password:ro" \
   -e IPQUALITY_ADMIN_PASSWORD_FILE=/run/secrets/admin_password \
   ipqualitymonitor:server-preview
+test "$(docker exec "$name" id -u)" = 10001
+# The web process has no effective capabilities; only the packet helper receives NET_RAW.
+docker exec "$name" sh -c "grep '^CapEff:[[:space:]]*0000000000000000$' /proc/1/status"
+docker exec "$name" getcap /usr/local/libexec/iqm-mtr-packet | grep -q cap_net_raw
 port=$(docker port "$name" 8080/tcp | head -1 | sed 's/.*://')
 sudo python3 tests/server/smoke_http.py --url "http://127.0.0.1:$port" --password-file "$root/password"
+docker exec "$name" dotnet /app/IpQualityMonitor.Web.dll --healthcheck
+if [ "${IQM_BROWSER_SMOKE:-0}" = 1 ]; then
+  browser_password=$(mktemp)
+  sudo cat "$root/password" > "$browser_password"
+  node tests/server/browser-smoke.cjs --url "http://127.0.0.1:$port" --password-file "$browser_password"
+  rm -f "$browser_password"
+  browser_password=""
+fi
 # SIGTERM should retain desired running state and the same stable instance manifest.
 before=$(sudo cat "$root/data/instance.json")
 docker stop --time 45 "$name" >/dev/null
 test "$(docker inspect -f '{{.State.ExitCode}}' "$name")" = 0
 docker start "$name" >/dev/null
-sleep 3
+sudo python3 tests/server/smoke_http.py --url "http://127.0.0.1:$port" --password-file "$root/password" --resume
 after=$(sudo cat "$root/data/instance.json")
 test "$before" = "$after"
 printf '%s\n' 'PASS stable dataset identity after restart'

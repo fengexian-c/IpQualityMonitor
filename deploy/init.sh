@@ -6,6 +6,10 @@ if [ "$(id -u)" != 0 ]; then
     exit 1
 fi
 umask 077
+# Refuse symlinks before privileged ownership/mode changes or secret writes.
+for path in data secrets secrets/admin_password.txt .env; do
+    if [ -L "$path" ]; then echo "Refusing symbolic link: $path" >&2; exit 1; fi
+done
 mkdir -p data secrets
 # Only the application data directory is changed; never recursively chown a NAS share.
 chown 10001:10001 data

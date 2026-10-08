@@ -8,8 +8,9 @@ public sealed class MonitoringHost(MonitorRuntime runtime, LinuxNetworkContext n
 {
     public async Task StartAsync(CancellationToken token)
     {
-        await Task.WhenAll(runtime.Configuration.Profiles.Select(p => network.RefreshAsync(p.Address, token)));
-        await runtime.StartAsync();
+        await Task.WhenAll(runtime.Configuration.Profiles.Where(p => p.ResumeOnLaunch)
+            .Select(p => network.RefreshAsync(p.Address, token)));
+        await runtime.StartAsync(token);
     }
     public async Task StopAsync(CancellationToken token) => await runtime.DisposeAsync();
 }

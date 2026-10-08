@@ -11,13 +11,14 @@ p = argparse.ArgumentParser()
 p.add_argument('--url', required=True)
 p.add_argument('--password-file', required=True)
 p.add_argument('--tcp-only', action='store_true')
+p.add_argument('--resume', action='store_true', help='Validate the existing disposable smoke dataset after restart')
 a = p.parse_args()
 base = a.url.rstrip('/')
 opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 csrf = ''
 
 def request(path, method='GET', body=None):
-    data = None if body is None else json.dumps(body).encode()
+    data = body if isinstance(body, bytes) else (None if body is None else json.dumps(body).encode())
     headers = {'Content-Type': 'application/json'}
     if method != 'GET': headers['X-CSRF-TOKEN'] = csrf
     result = opener.open(urllib.request.Request(base + path, data=data, headers=headers, method=method), timeout=10)
@@ -41,16 +42,41 @@ request('/api/auth/login', 'POST', {'password': password})
 csrf = request('/api/auth/csrf')['token']
 state = request('/api/overview')
 assert state['network'] == 'bridge'
-assert state['config']['profiles'] == [], 'Refusing to change an existing dataset'
-policy = state['config']['monitoring']
-policy['intervalSeconds'] = 1
-policy['enableRoutes'] = not a.tcp_only
-request('/api/settings', 'PUT', {'revision': state['config']['revision'], 'monitoring': policy})
-state = request('/api/overview')
-profile = request('/api/targets', 'POST', {'revision': state['config']['revision'], 'target':
-    {'name': 'smoke-loopback-only', 'address': '127.0.0.1', 'mode': 'Tcp' if a.tcp_only else 'Both', 'port': 8080}})
-state = request('/api/overview')
-request('/api/targets/' + profile['id'] + '/run', 'POST', {'revision': state['config']['revision'], 'running': True})
+if a.resume:
+    profiles = state['config']['profiles']
+    assert len(profiles) == 1 and profiles[0]['name'] == 'smoke-loopback-only', 'Unexpected smoke dataset'
+    profile = {'id': profiles[0]['id']}
+else:
+    assert state['config']['profiles'] == [], 'Refusing to change an existing dataset'
+    revision = state['config']['revision']
+    def rejected(path, method, body, status=400):
+        try:
+            request(path, method, body)
+            raise AssertionError('Invalid input was accepted: ' + path)
+        except urllib.error.HTTPError as error:
+            assert error.code == status, (path, error.code, error.read().decode())
+    valid_target = {'name': 'validation-only', 'address': '127.0.0.1', 'mode': 'Tcp', 'port': 8080}
+    for body in [b'{broken', {}, {'revision': revision}, {'revision': revision, 'target': None},
+                 {'target': valid_target},
+                 {'revision': revision, 'target': dict(valid_target, name='x' * 101)},
+                 {'revision': revision, 'target': dict(valid_target, mode='Unsupported')},
+                 {'revision': revision, 'target': dict(valid_target, address='not-an-IP')}]:
+        rejected('/api/targets', 'POST', body)
+    for body in [{}, {'revision': revision}, {'revision': revision, 'monitoring': None}]:
+        rejected('/api/settings', 'PUT', body)
+    assert request('/api/overview')['config']['revision'] == revision
+    print('PASS malformed, missing, null and invalid inputs do not mutate configuration')
+    policy = state['config']['monitoring']
+    policy['intervalSeconds'] = 1
+    policy['enableRoutes'] = not a.tcp_only
+    request('/api/settings', 'PUT', {'revision': revision, 'monitoring': policy})
+    rejected('/api/settings', 'PUT', {'revision': revision, 'monitoring': policy}, 409)
+    state = request('/api/overview')
+    profile = request('/api/targets', 'POST', {'revision': state['config']['revision'], 'target':
+        {'name': 'smoke-loopback-only', 'address': '127.0.0.1', 'mode': 'Tcp' if a.tcp_only else 'Both', 'port': 8080}})
+    state = request('/api/overview')
+    rejected('/api/targets/' + profile['id'] + '/run', 'POST', {'revision': state['config']['revision']})
+    request('/api/targets/' + profile['id'] + '/run', 'POST', {'revision': state['config']['revision'], 'running': True})
 for attempt in range(40):
     state = request('/api/overview')
     target = state['targets'][0]
@@ -72,3 +98,22 @@ except urllib.error.HTTPError as error:
     assert error.code == 400, error.code
 csrf = old
 print('PASS authenticated writes require CSRF')
+
+request('/health/ready')
+for protocol in (['Tcp'] if a.tcp_only else ['Tcp', 'Icmp']):
+    for attempt in range(25):
+        timeline = request('/api/targets/' + profile['id'] + '/timeline?protocol=' + protocol + '&days=1')['timeline']
+        if timeline['total']['attempts'] > 0: break
+        time.sleep(1)
+    else: raise AssertionError('No persisted timeline samples for ' + protocol)
+request('/api/targets/' + profile['id'] + '/events')
+if not a.tcp_only:
+    for attempt in range(30):
+        routes = request('/api/targets/' + profile['id'] + '/routes')
+        if routes: break
+        time.sleep(1)
+    else: raise AssertionError('No loopback route persisted')
+print('PASS readiness and SQLite history queries' + ('' if a.tcp_only else ' and route persistence') + (' after restart' if a.resume else ''))
+request('/api/auth/logout', 'POST')
+assert request('/api/auth/session')['authenticated'] is False
+print('PASS logout invalidates authenticated session')

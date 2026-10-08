@@ -44,20 +44,28 @@ public sealed class LinuxNetworkContext : IAsyncDisposable
     }
     private Task Schedule(string address)
     {
-        if (_stop.IsCancellationRequested) return Task.CompletedTask;
-        if (_cache.Count >= 128 && !_cache.ContainsKey(address))
-        {
-            // Targets can be removed/re-added indefinitely; do not permanently exhaust the cache.
-            var oldest = _cache.OrderBy(pair => pair.Value.Updated).FirstOrDefault().Key;
-            if (oldest is not null) _cache.TryRemove(oldest, out _);
-        }
-        // Lazy avoids ConcurrentDictionary value factory starting duplicate processes.
+        // Admission and shutdown share the lock: queued work is bounded as well as processes.
         lock (_refreshing)
         {
+            if (_stop.IsCancellationRequested) return Task.CompletedTask;
             if (_refreshing.TryGetValue(address, out var existing)) return existing;
+            if (_refreshing.Count >= 128) return Task.CompletedTask;
             var task = Task.Run(() => RefreshCoreAsync(address)); _refreshing[address] = task;
             _ = task.ContinueWith(_ => { lock (_refreshing) _refreshing.TryRemove(address, out var ignored); }, TaskScheduler.Default);
             return task;
+        }
+    }
+    private void Store(string address, NetworkContext context)
+    {
+        lock (_refreshing)
+        {
+            if (_stop.IsCancellationRequested) return;
+            if (_cache.Count >= 128 && !_cache.ContainsKey(address))
+            {
+                var oldest = _cache.OrderBy(pair => pair.Value.Updated).First().Key;
+                _cache.TryRemove(oldest, out _);
+            }
+            _cache[address] = new(context, Environment.TickCount64);
         }
     }
     private async Task RefreshCoreAsync(string address)
@@ -80,7 +88,7 @@ public sealed class LinuxNetworkContext : IAsyncDisposable
                 var text = await output.ConfigureAwait(false); await errors.ConfigureAwait(false);
                 if (process.ExitCode != 0) throw new IOException("内核选路查询失败。");
                 var context = Parse(text, _site);
-                _cache[address] = new(context, Environment.TickCount64);
+                Store(address, context);
             }
             finally
             {
@@ -89,7 +97,7 @@ public sealed class LinuxNetworkContext : IAsyncDisposable
             }
         }
         catch (Exception ex)
-        { _cache[address] = new(new("unknown", "Docker bridge · 系统选路不可用：" + ex.Message), Environment.TickCount64); }
+        { Store(address, new("unknown", "Docker bridge · 系统选路不可用：" + ex.Message)); }
         finally { if (acquired) _workers.Release(); }
     }
     private static async Task<string> ReadBoundedAsync(StreamReader reader, CancellationToken token)
@@ -116,7 +124,8 @@ public sealed class LinuxNetworkContext : IAsyncDisposable
     }
     public async ValueTask DisposeAsync()
     {
-        _stop.Cancel(); Task[] tasks; lock (_refreshing) tasks = _refreshing.Values.ToArray();
+        Task[] tasks;
+        lock (_refreshing) { _stop.Cancel(); tasks = _refreshing.Values.ToArray(); }
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 }

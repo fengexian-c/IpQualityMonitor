@@ -2,6 +2,13 @@
 
 Windows 多目标 IP 持续监控工具。支持 ICMP、TCP、双协议分别统计，路由历史、异常恢复和本地诊断包导出。沿用 WinUI 3、.NET 10 NativeAOT、SQLite、原生托盘、免安装发布方式。基础监测不依赖外部运行时、Nmap、抓包驱动、NextTrace 或 Docker。
 
+## Linux / NAS Docker 分支
+
+当前 Docker 开发分支为 `docker/bridge-preview-20261008`，使用浏览器访问、SQLite 持久化目录，
+坚持 **bridge + ports 端口映射**。详见 [构建、首次初始化与部署](docs/DOCKER-BRIDGE-PREVIEW.md)
+及 [验证范围](verification/server-preview/STATUS.md)。镜像自行构建，默认不开放公网；未提供固定默认密码。
+Docker UI 尚未包含 Windows 全部功能，具体差异见部署说明。
+
 ## 开始使用
 
 1. 完整解压 `IpQualityMonitor-v2.8.1-win-x64.zip` 到可写目录。
@@ -183,4 +190,5 @@ ICMP 无回应不能证明目标离线或已确认禁 Ping；ICMP 正常不代�
 用 `-Dotnet 'SDK路径\dotnet.exe'` 指定 SDK，`-Packages '完整NuGet缓存目录'` 离线构建。默认 Windows x64 自包含 NativeAOT。验证结果和限制见 `docs/VALIDATION.md`。
 
 桌面结构参考用户提供的 KaringLatencyMonitor，保留 MIT 许可 `LICENSE.reference`。探测与诊断代码独立实现，借鉴 TcpQuality/NetQuality 的思路；名称表及地址段证据记录来源，未移植其脚本、上传服务或脚本运行环境。
+
 

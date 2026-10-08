@@ -1,25 +1,47 @@
 const $ = id => document.getElementById(id);
 let csrf = '', snapshot = null, selected = localStorage.getItem('iqm.target') || '', overviewBusy = false;
-let overviewTimer = null, detailTimer = null, detailController = null, routes = [];
+let overviewTimer = null, detailTimer = null, overviewController = null, detailController = null, routes = [];
+let sessionEpoch = 0;
+const targetMutations = new Set();
 const message = text => { $('message').textContent = text || ''; };
 async function api(path, options = {}) {
+  const epoch = sessionEpoch;
   const { body, signal, ...rest } = options;
   const headers = { ...(options.headers || {}) };
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (rest.method && rest.method !== 'GET') headers['X-CSRF-TOKEN'] = csrf;
   const response = await fetch('/api' + path, { ...rest, headers, signal: signal || AbortSignal.timeout(15000),
     credentials: 'same-origin', body: body === undefined ? undefined : JSON.stringify(body) });
-  if (response.status === 401) { showLogin(); throw new Error('请登录或重新登录。'); }
+  if (response.status === 401) { if (epoch === sessionEpoch) showLogin(); throw new Error('请登录或重新登录。'); }
   if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.error || `请求失败（${response.status}）`); }
   if (response.status === 204 || response.headers.get('content-length') === '0') return null;
   return response.json().catch(() => null);
 }
 async function getCsrf() { csrf = (await api('/auth/csrf')).token; }
-function stopPolling() { clearInterval(overviewTimer); clearInterval(detailTimer); detailController?.abort(); }
-function showLogin() { stopPolling(); $('login').hidden = false; $('workspace').hidden = true; $('logout').hidden = true; }
+function stopPolling() {
+  clearInterval(overviewTimer); clearInterval(detailTimer);
+  overviewController?.abort(); overviewController = null; overviewBusy = false;
+  detailController?.abort(); detailController = null;
+}
+function clearDetail() {
+  detailController?.abort(); routes = [];
+  for (const id of ['chart', 'hours', 'route-list', 'route-hops', 'events']) $(id).replaceChildren();
+  for (const id of ['totals', 'window', 'route-info']) $(id).textContent = '';
+}
+function showLogin() {
+  sessionEpoch++; stopPolling(); snapshot = null; clearDetail(); $('detail').hidden = true;
+  $('targets').replaceChildren();
+  for (const id of ['site-name', 'site-info', 'health', 'target-count', 'detail-name']) $(id).textContent = '';
+  $('health').hidden = true;
+  $('settings').open = false; $('settings-form').reset();
+  $('login').hidden = false; $('workspace').hidden = true; $('logout').hidden = true;
+}
 async function showWorkspace() {
-  await getCsrf(); $('login').hidden = true; $('workspace').hidden = false; $('logout').hidden = false;
-  stopPolling(); await refreshOverview();
+  const epoch = ++sessionEpoch; stopPolling(); await getCsrf();
+  if (epoch !== sessionEpoch) return;
+  $('login').hidden = true; $('workspace').hidden = false; $('logout').hidden = false;
+  await refreshOverview();
+  if (epoch !== sessionEpoch || $('workspace').hidden) return;
   overviewTimer = setInterval(() => { if (!document.hidden) refreshOverview(); }, 2000);
   detailTimer = setInterval(() => { if (!document.hidden) refreshDetail(); }, 15000);
   await refreshDetail();
@@ -28,13 +50,37 @@ const format = (date) => new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', 
 const number = value => Number.isFinite(value) ? value.toFixed(2) : '—';
 const stateLabels = { Success: '成功', Refused: '连接被拒绝', Timeout: '超时', Unreachable: '不可达', LocalError: '本地错误', Failed: '失败' };
 function cell(row, text) { const el = document.createElement('td'); el.textContent = text; row.append(el); return el; }
-function button(text, action, className = '') { const el = document.createElement('button'); el.textContent = text; el.className = className;
-  el.addEventListener('click', async () => { el.disabled = true; try { await action(); message(''); } catch (e) { message(e.message); } finally { el.disabled = false; } }); return el; }
+async function perform(el, action) {
+  if (el.disabled) return;
+  el.disabled = true; const epoch = sessionEpoch;
+  const current = () => epoch === sessionEpoch;
+  try { await action(current); }
+  catch (e) { if (current() && e.name !== 'AbortError') message(e.message); }
+  finally { el.disabled = false; }
+}
+function setTargetPending(id, pending) {
+  if (pending) targetMutations.add(id); else targetMutations.delete(id);
+  for (const el of document.querySelectorAll('button[data-target-mutation]'))
+    if (el.dataset.targetMutation === id) el.disabled = pending;
+}
+function button(text, action, className = '', mutationKey = null) {
+  const el = document.createElement('button'); el.textContent = text; el.className = className;
+  if (mutationKey !== null) { el.dataset.targetMutation = mutationKey; el.disabled = targetMutations.has(mutationKey); }
+  el.addEventListener('click', () => perform(el, async current => {
+    if (mutationKey !== null && targetMutations.has(mutationKey)) return;
+    if (mutationKey !== null) setTargetPending(mutationKey, true);
+    try { await action(); if (current()) message(''); }
+    finally { if (mutationKey !== null) setTargetPending(mutationKey, false); }
+  })); return el;
+}
 async function refreshOverview() {
   if (overviewBusy || $('workspace').hidden) return;
-  overviewBusy = true;
+  overviewBusy = true; const epoch = sessionEpoch, controller = new AbortController();
+  overviewController = controller;
   try {
-    snapshot = await api('/overview');
+    const next = await api('/overview', { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
+    if (epoch !== sessionEpoch || controller.signal.aborted || $('workspace').hidden) return;
+    snapshot = next;
     $('site-name').textContent = snapshot.site.name;
     $('site-info').textContent = `采集点 ${snapshot.site.id.slice(0, 8)} · ${snapshot.timeZone} · ${format(snapshot.serverTime)}`;
     const errors = [snapshot.error, snapshot.analysisError, snapshot.probeError].filter(Boolean);
@@ -54,11 +100,11 @@ async function refreshOverview() {
       const actions = document.createElement('div'); actions.className = 'actions'; cell(row, '').append(actions);
       actions.append(button(target.running ? '暂停' : '开始', async () => {
         await api(`/targets/${p.id}/run`, { method: 'POST', body: { revision: snapshot.config.revision, running: !target.running } }); await refreshOverview();
-      }, 'secondary'));
+      }, 'secondary', p.id));
       actions.append(button('移除', async () => {
         if (!confirm('移除目标配置？保留期限内的原始历史不会因此被删除。')) return;
         await api(`/targets/${p.id}?revision=${snapshot.config.revision}`, { method: 'DELETE' }); await refreshOverview();
-      }, 'danger'));
+      }, 'danger', p.id));
       fragment.append(row);
     }
     $('targets').replaceChildren(fragment);
@@ -69,8 +115,8 @@ async function refreshOverview() {
         option.disabled = selectedProfile.mode !== 'Both' && option.value !== selectedProfile.mode;
     }
     if (!$('settings').open) populateSettings();
-  } catch (e) { if (e.name !== 'AbortError') message(e.message); }
-  finally { overviewBusy = false; }
+  } catch (e) { if (epoch === sessionEpoch && !controller.signal.aborted && e.name !== 'AbortError') message(e.message); }
+  finally { if (overviewController === controller) { overviewBusy = false; overviewController = null; } }
 }
 function populateSettings() {
   if (!snapshot) return;
@@ -81,6 +127,7 @@ function populateSettings() {
   }
 }
 async function select(id) {
+  if (selected !== id) clearDetail();
   selected = id; localStorage.setItem('iqm.target', id);
   const p = snapshot.targets.find(x => x.profile.id === id).profile;
   $('protocol').value = p.mode === 'Tcp' ? 'Tcp' : 'Icmp';
@@ -145,20 +192,41 @@ function showRoute() {
     const rtts = replies.map(p => p.rttMs).filter(Number.isFinite); cell(row, number(rtts.length ? rtts.reduce((a,b) => a+b,0)/rtts.length : null) + ' ms'); $('route-hops').append(row);
   }
 }
-$('login-form').addEventListener('submit', async event => { event.preventDefault(); const submit = event.target.querySelector('button'); submit.disabled = true;
+$('login-form').addEventListener('submit', async event => { event.preventDefault(); const submit = event.target.querySelector('button'); if (submit.disabled) return; submit.disabled = true;
   try { await getCsrf(); await api('/auth/login', { method: 'POST', body: { password: $('password').value } }); $('password').value = ''; message(''); await showWorkspace(); }
   catch (e) { message(e.message); } finally { submit.disabled = false; } });
-$('logout').addEventListener('click', async () => { try { await api('/auth/logout', { method: 'POST' }); showLogin(); } catch (e) { message(e.message); } });
-$('add-form').addEventListener('submit', async event => { event.preventDefault(); const form = event.target, data = new FormData(form);
-  try { await api('/targets', { method: 'POST', body: { revision: snapshot.config.revision, target: { name: data.get('name'), address: data.get('address'), mode: data.get('mode'), port: Number(data.get('port')) } } }); form.reset(); message('目标已添加，尚未开始采集。'); await refreshOverview(); }
-  catch (e) { message(e.message); } });
+$('logout').addEventListener('click', () => perform($('logout'), async current => {
+  await api('/auth/logout', { method: 'POST' }); if (current()) showLogin();
+}));
+$('add-form').addEventListener('submit', event => {
+  event.preventDefault(); const form = event.target;
+  perform(form.querySelector('button'), async current => {
+    const data = new FormData(form);
+    await api('/targets', { method: 'POST', body: { revision: snapshot.config.revision, target: { name: data.get('name'), address: data.get('address'), mode: data.get('mode'), port: Number(data.get('port')) } } });
+    if (!current()) return;
+    form.reset(); message('目标已添加，尚未开始采集。'); await refreshOverview();
+  });
+});
 $('settings').addEventListener('toggle', () => { if ($('settings').open) populateSettings(); });
-$('settings-form').addEventListener('submit', async event => { event.preventDefault(); const form = event.target, values = {};
-  for (const el of form.elements) if (el.name) values[el.name] = el.type === 'checkbox' ? el.checked : Number(el.value);
-  try { await api('/settings', { method: 'PUT', body: { revision: Number(form.dataset.revision), monitoring: values } }); $('settings').open = false; message('已保存并应用统一设置。'); await refreshOverview(); }
-  catch (e) { message(e.message); } });
+$('settings-form').addEventListener('submit', event => {
+  event.preventDefault(); const form = event.target;
+  perform(form.querySelector('button'), async current => {
+    const values = {};
+    for (const el of form.elements) if (el.name) values[el.name] = el.type === 'checkbox' ? el.checked : Number(el.value);
+    await api('/settings', { method: 'PUT', body: { revision: Number(form.dataset.revision), monitoring: values } });
+    if (!current()) return;
+    $('settings').open = false; message('已保存并应用统一设置。'); await refreshOverview();
+  });
+});
 $('days').addEventListener('change', refreshDetail); $('protocol').addEventListener('change', refreshDetail); $('route-list').addEventListener('change', showRoute);
-$('probe-route').addEventListener('click', async () => { try { await api(`/targets/${selected}/route`, { method: 'POST' }); message('路由检查请求已接受，结果将在后台保存。'); } catch (e) { message(e.message); } });
+$('probe-route').addEventListener('click', () => perform($('probe-route'), async current => {
+  await api(`/targets/${selected}/route`, { method: 'POST' }); if (current()) message('路由检查请求已接受，结果将在后台保存。');
+}));
 document.addEventListener('visibilitychange', () => { if (document.hidden) detailController?.abort(); else { refreshOverview(); refreshDetail(); } });
 window.addEventListener('pagehide', stopPolling);
+window.addEventListener('pageshow', async event => {
+  if (!event.persisted) return;
+  try { const session = await api('/auth/session'); if (session.authenticated) await showWorkspace(); else showLogin(); }
+  catch (e) { message(e.message); showLogin(); }
+});
 try { const session = await api('/auth/session'); if (session.authenticated) await showWorkspace(); else showLogin(); } catch (e) { message(e.message); showLogin(); }

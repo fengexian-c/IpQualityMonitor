@@ -43,7 +43,8 @@ public sealed class ServerStorage : IDisposable
     public ServerStorage(string path, string name)
     {
         DirectoryPath = Path.GetFullPath(path);
-        Directory.CreateDirectory(DirectoryPath);
+        if (OperatingSystem.IsWindows()) Directory.CreateDirectory(DirectoryPath);
+        else Directory.CreateDirectory(DirectoryPath, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         _lease = new FileStream(Path.Combine(DirectoryPath, "server.lock"), FileMode.OpenOrCreate,
             FileAccess.ReadWrite, FileShare.None);
         try
@@ -51,8 +52,8 @@ public sealed class ServerStorage : IDisposable
             var manifest = Path.Combine(DirectoryPath, "instance.json");
             if (!File.Exists(manifest))
             {
-                if (File.Exists(Path.Combine(DirectoryPath, "history.db")) ||
-                    File.Exists(Path.Combine(DirectoryPath, "route-analysis.db")) || File.Exists(ConfigurationPath))
+                if (HasDatabaseFiles() || File.Exists(ConfigurationPath) ||
+                    File.Exists(Path.Combine(DirectoryPath, "settings.json")))
                     throw new InvalidDataException("发现未标记的现有数据。请为服务器使用新目录，不要直接挂载 Windows data。");
                 Site = new(1, Guid.NewGuid().ToString("N"), string.IsNullOrWhiteSpace(name) ? "Docker bridge" : name,
                     "bridge", DateTimeOffset.UtcNow);
@@ -63,12 +64,15 @@ public sealed class ServerStorage : IDisposable
                 Site = Read<ProbeSite>(manifest);
                 if (Site.SchemaVersion != 1 || !Guid.TryParseExact(Site.Id, "N", out _) || Site.NetworkMode != "bridge")
                     throw new InvalidDataException("不支持的采集点数据格式。");
-                if (!File.Exists(ConfigurationPath) && File.Exists(Path.Combine(DirectoryPath, "history.db")))
+                if (!File.Exists(ConfigurationPath) && HasDatabaseFiles())
                     throw new InvalidDataException("服务器配置丢失；请从完整备份恢复，不会自动覆盖历史。");
             }
         }
         catch { _lease.Dispose(); throw; }
     }
+    private bool HasDatabaseFiles() => new[] { "history.db", "route-analysis.db" }
+        .Any(name => new[] { "", "-wal", "-shm", "-journal" }
+            .Any(suffix => File.Exists(Path.Combine(DirectoryPath, name + suffix))));
     public ServerConfiguration Load()
     {
         var config = File.Exists(ConfigurationPath) ? Read<ServerConfiguration>(ConfigurationPath) : ServerConfiguration.Empty;
@@ -84,7 +88,10 @@ public sealed class ServerStorage : IDisposable
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
-            using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            var options = new FileStreamOptions { Mode = FileMode.CreateNew, Access = FileAccess.Write, Share = FileShare.None };
+            // Credentials and configuration must never be world-readable, even before the rename.
+            if (!OperatingSystem.IsWindows()) options.UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+            using (var stream = new FileStream(temporary, options))
             { JsonSerializer.Serialize(stream, value, Json); stream.Flush(true); }
             File.Move(temporary, path, true);
         }

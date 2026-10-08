@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
-# Initial preview. For a release, resolve these maintained tags to tested image digests.
-FROM ubuntu:24.04 AS packet
+# Manifest digests verified by the amd64 CI on 2026-10-08.
+# Supported deployment target: linux/amd64.
+# Update deliberately and rerun build/smoke tests for security updates.
+FROM ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55 AS packet
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates git build-essential autoconf automake libtool pkg-config libcap-dev python3 \
@@ -14,13 +16,14 @@ RUN revision="$(python3 -c 'import json; print(json.load(open("/patches/UPSTREAM
     && python3 /patches/patch.py /mtr \
     && ./bootstrap.sh && ./configure --without-gtk --without-ncurses --without-ncursesw \
     && make -j2 mtr-packet \
+    && python3 /patches/test_contract.py /mtr \
     && mkdir -p /artifacts \
     && cp mtr-packet /artifacts/iqm-mtr-packet \
     && cp -a /patches /mtr/iqm-patches \
     && tar --exclude=.git --exclude='*.o' --exclude=mtr-packet --exclude=mtr \
        --exclude=autom4te.cache -czf /artifacts/mtr-source.tar.gz -C /mtr .
 
-FROM mcr.microsoft.com/dotnet/sdk:10.0-noble AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble@sha256:e70cdb7f80b0348f5cb85f19a8f670fca061f033d57eed12fa003d58b0e06317 AS build
 WORKDIR /source
 COPY NuGet.Config ./
 COPY src/TcpLatencyMonitor.Core/ src/TcpLatencyMonitor.Core/
@@ -34,9 +37,10 @@ FROM build AS tests
 COPY tests/ tests/
 RUN dotnet run --project tests/IpQualityMonitor.Server.Tests/IpQualityMonitor.Server.Tests.csproj -c Release \
     && dotnet run --project tests/TcpLatencyMonitor.Tests/TcpLatencyMonitor.Tests.csproj -c Release -- --routes \
-    && dotnet run --project tests/TcpLatencyMonitor.Tests/TcpLatencyMonitor.Tests.csproj -c Release -- --route-history
+    && dotnet run --project tests/TcpLatencyMonitor.Tests/TcpLatencyMonitor.Tests.csproj -c Release -- --route-history \
+    && dotnet run --project tests/TcpLatencyMonitor.Tests/TcpLatencyMonitor.Tests.csproj -c Release -- --multi
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble AS runtime
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble@sha256:222759b391a1aaf241166672c8f99b2d4ada452e7b5319f3c6e8f265a37b5ad4 AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends iproute2 libcap2-bin ca-certificates tzdata \
     && rm -rf /var/lib/apt/lists/* \

@@ -7,6 +7,8 @@ public sealed record AdminHash(int SchemaVersion, int Iterations, string Salt, s
 public sealed class AdminCredentials
 {
     private readonly AdminHash _record;
+    private readonly byte[] _salt;
+    private readonly byte[] _hash;
     public AdminCredentials(ServerStorage storage, IConfiguration configuration)
     {
         var path = Path.Combine(storage.DirectoryPath, "admin-auth.json");
@@ -27,15 +29,24 @@ public sealed class AdminCredentials
             if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
         if (_record.SchemaVersion != 1 || _record.Iterations is < 100000 or > 1000000 ||
-            Convert.FromBase64String(_record.Salt).Length != 32 || Convert.FromBase64String(_record.Hash).Length != 32)
+            _record.Salt is null || _record.Hash is null)
             throw new InvalidDataException("管理员凭据格式无效。");
+        try
+        {
+            _salt = Convert.FromBase64String(_record.Salt);
+            _hash = Convert.FromBase64String(_record.Hash);
+        }
+        catch (FormatException ex) { throw new InvalidDataException("管理员凭据格式无效。", ex); }
+        if (_salt.Length != 32 || _hash.Length != 32) throw new InvalidDataException("管理员凭据格式无效。");
+        if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
     public string SecurityStamp => _record.Salt;
-    public bool Verify(string password)
+    public bool Verify(string? password)
     {
-        if (password.Length is < 1 or > 256) return false;
-        var computed = Rfc2898DeriveBytes.Pbkdf2(password, Convert.FromBase64String(_record.Salt),
+        if (password is null || password.Length is < 1 or > 256) return false;
+        var computed = Rfc2898DeriveBytes.Pbkdf2(password, _salt,
             _record.Iterations, HashAlgorithmName.SHA512, 32);
-        return CryptographicOperations.FixedTimeEquals(computed, Convert.FromBase64String(_record.Hash));
+        try { return CryptographicOperations.FixedTimeEquals(computed, _hash); }
+        finally { CryptographicOperations.ZeroMemory(computed); }
     }
 }

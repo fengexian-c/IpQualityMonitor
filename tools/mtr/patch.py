@@ -89,9 +89,29 @@ def apply(root: Path) -> None:
     }''')
     sources['packet/probe_unix.c'] = unix
 
+    # Upstream receives before checking expiry; a queued late packet must not be a success.
+    unix = once(unix, '    round_trip_us =', '''    if ((probe->platform.timeout_time.tv_sec || probe->platform.timeout_time.tv_usec) &&
+        compare_timeval(*timestamp, probe->platform.timeout_time) >= 0) {
+        printf("%d no-reply\\n", probe->token);
+        free_probe(net_state, probe);
+        return;
+    }
+    round_trip_us =''')
+    sources['packet/probe_unix.c'] = unix
+
     # Carry ICMP type/code through the existing internal integer result parameter.
     # Only the private component emits these tagged results; CLI mtr is not installed.
     decoder = sources['packet/deconstruct_unix.c']
+    decoder = once(decoder, '''    receive_probe(net_state, probe, icmp_type,
+                  remote_addr, timestamp, mpls_count, mpls);''', '''    if (probe->remote_addr.ss_family != remote_addr->ss_family) return;
+    if (icmp_type == ICMP_ECHOREPLY &&
+        memcmp(sockaddr_addr_offset(&probe->remote_addr),
+               sockaddr_addr_offset(remote_addr), sockaddr_addr_size(remote_addr))) return;
+    receive_probe(net_state, probe, icmp_type,
+                  remote_addr, timestamp, mpls_count, mpls);''')
+    for echo in ('ICMP_ECHOREPLY', 'ICMP6_ECHOREPLY'):
+        decoder = once(decoder, f'    if (icmp->type == {echo}) {{',
+                       f'    if (icmp->type == {echo} && icmp->code == 0) {{')
     for family, condition in ((4, 'ICMP_DEST_UNREACH'), (6, 'ICMP6_DEST_UNREACH')):
         marker = f'    if (icmp->type == {condition}) {{'
         replacement = f'''    if (icmp->type == {condition}) {{
@@ -170,7 +190,8 @@ static inline int iqm_gettime(struct timeval *value, void *unused) {
     (root / 'IQM-PATCHES.txt').write_text(
         'IQM Linux packet contract v1\nUpstream: ' + lock['commit'] + '\n'
         'Changes: millisecond expiry; acknowledged cancellation; raw-mode capability checks;\n'
-        'lossless error type/code for handled ICMP errors; monotonic packet clocks.\n'
+        'lossless error type/code for handled ICMP errors; monotonic packet clocks;\n'
+        'reject late replies, mismatched address families and foreign Echo replies.\n'
         'Experimental: final image and controlled-network validation required.\n')
 
 

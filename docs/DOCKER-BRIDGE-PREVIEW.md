@@ -2,16 +2,20 @@
 
 ## 状态与范围
 
-这是第一阶段代码，基于 `fengexian-c/IpQualityMonitor` 的提交
-`7ff18b1dc81320faea5ae5b6863146afdc8264f4`（2.8.1）。
+此分支 `docker/bridge-preview-20261008` 提供独立的 Linux/NAS Docker 服务，基于原仓库
+`7ff18b1dc81320faea5ae5b6863146afdc8264f4`（Windows 2.8.1），使用 ASP.NET Core、浏览器界面与持久化 SQLite。
+分支已经提交到 GitHub；不需要手动应用补丁。`main` 和原 Windows 项目保持不变。
 
-**不是已发布的稳定镜像，也没有完成 Linux 实机、ARM64 或 24—72 小时验收。**
-本次环境没有 .NET SDK / Docker，且无法直接拉取仓库到构建环境，因此没有执行完整 .NET 编译或整套 mtr 编译。
-已经执行的检查和没有执行的检查见 `verification/server-preview/STATUS.md`。
-GitHub 连接创建开发分支返回 403，本次远端仓库没有任何修改。交付方式为新增文件与 Git 补丁。
+采用 **bridge 网络与显式 `ports:`**，没有 host 网络回退。默认只监听宿主机回环地址，
+首次运行需随机生成管理员密码，未提供有效凭据时服务拒绝启动。
 
-本次只增加项目和部署文件，不改动现有 Core、Windows App 或 Windows 构建脚本。
-服务器引用原有 Core，复用其 TCP、路由策略、时间轴、历史写入和路由分析。
+**这是可自行构建验证的 Docker 开发分支，不是已发布的稳定镜像。**
+实际构建、测试和未验证边界见 [验证状态](../verification/server-preview/STATUS.md)。
+CI 对 `docker/**` 分支在原生 amd64 runner 上构建及冒烟测试，不上传镜像、不部署。
+不能仅凭一次 CI 通过推断所有 NAS、IPv6 公网及长期运行已经验收。
+
+服务器引用原有 Core，复用 TCP、路由探测策略、时间轴、历史写入和路由分析。
+既有 Windows 数据目录与配置不能直接作为服务器数据目录挂载。
 
 ## 已写入本次代码的功能
 
@@ -27,6 +31,8 @@ GitHub 连接创建开发分支返回 403，本次远端仓库没有任何修改
 - 基础静态网页：全部目标、24h/7d 折线和小时格、最近原始路由、事件、统一设置。
 - Docker bridge、显式 `ports:`、非 root、持久目录、只读根文件系统、local 日志轮转。
 - 独立源码检查、.NET 控制台检查、Docker 冒烟脚本和 GitHub Actions 工作流。
+- 请求字段/长度/模式校验，损坏或不完整数据拒绝覆盖；停止服务时先排空读取再释放 SQLite 与目录锁。
+- 健康检查反映后台就绪及写入故障；登录退出后不会用旧请求恢复页面，重复表单提交受到保护。
 
 ## 明确没有完成的部分
 
@@ -42,27 +48,23 @@ GitHub 连接创建开发分支返回 403，本次远端仓库没有任何修改
 IPv6 公网探测和 Docker IPv6 出口需实测；链路本地 IPv6 明确返回本地不支持错误，
 不假装成功或超时。mtr 补丁和适配器尚未完成真实网络错误、丢包和取消拓扑测试。
 
-## 把补丁应用到仓库
-
-在原仓库工作区干净、基线提交存在的前提下，在仓库根目录执行：
+## 获取 Docker 分支
 
 ```sh
-git switch -c feature/docker-bridge-preview 7ff18b1dc81320faea5ae5b6863146afdc8264f4
-git apply --check /path/to/ipqualitymonitor-docker-bridge.patch
-git apply /path/to/ipqualitymonitor-docker-bridge.patch
-git status --short
+git clone --branch docker/bridge-preview-20261008 --single-branch https://github.com/fengexian-c/IpQualityMonitor.git
+cd IpQualityMonitor
 ```
 
-`/path/to/...` 替换为实际下载路径；Windows PowerShell 可以使用带引号的 Windows 路径。
-补丁只新增文件，不会删除或覆盖现有 Windows 文件。分支名已存在时请更换名称，不要强制重置。
-应用不会自动提交、推送或发布镜像。审阅并通过测试后再提交。
+已有仓库可先保存本地修改，再 fetch 并切换到该远端分支；不要强制重置或覆盖其他分支。
+分支名中的 `/` 是普通 Git 命名方式，不影响 Docker 构建。
 
 ## Linux / NAS 首次构建与运行
 
-前提：原生 Linux Docker Engine 与 Compose 插件。预览不承诺 rootless Docker，
+支持目标仅为 **linux/amd64（x86-64）**；ARM64 不在此分支的兼容承诺与测试范围内。
+前提：amd64 原生 Linux Docker Engine 与 Compose 插件。预览不承诺 rootless Docker，
 也不把 Docker Desktop 当成与 NAS 等价的网络验收环境。
 
-以下命令都在**应用补丁后的仓库根目录**执行，不是在独立增量文件包中执行：
+以下命令都在**上述 Docker 分支的仓库根目录**执行：
 
 ```sh
 # 创建只属于此应用的目录和初始随机密码。已有密码不会被覆盖。
@@ -201,12 +203,14 @@ dotnet run --project tests/TcpLatencyMonitor.Tests/TcpLatencyMonitor.Tests.cspro
 dotnet run --project tests/TcpLatencyMonitor.Tests/TcpLatencyMonitor.Tests.csproj -c Release -- --route-history
 ```
 
-`.NET` 新检查包括状态映射、配置锁/损坏保护、模拟子进程并发、取消、超时和崩溃分类。
+`.NET` 新检查包括状态映射、配置锁/损坏保护、启动/停止并发、凭据和模拟子进程并发、取消、超时和崩溃分类。
+固定基础镜像使用已经验证的 manifest digest；更新安全补丁时应主动更新 digest 并重新构建测试。
+原生 mtr 解码回归使用合成 IPv4/IPv6 数据包验证 type/code、迟到回应、外来/畸形回应与取消，不发出真实网络流量。
 这些模拟不能代替实际 raw ICMP、TTL、不可达及 Docker bridge 测试。
 
 `.github/workflows/server-preview.yml` 包含检查阶段、运行镜像构建与 bridge HTTP 冒烟测试。
-只定义工作流，不表示本次已经执行；没有自动推送 GHCR 或发布 Release。
-ARM64 要在相应架构进行构建与真实网络测试后再标为支持。
+工作流仅使用原生 amd64 runner；每次具体结果以对应提交的 Actions 记录为准。
+没有自动推送 GHCR 或发布 Release；NAS 实际出口与公网 IPv6 仍需在目标机器验收。
 
-下一道门槛是：完整编译通过 → 最终镜像权限与 loopback 冒烟 → 受控 IPv4/IPv6 拓扑 → 稳定性与恢复测试。
+验证层次是：完整编译 → 最终镜像权限与 loopback 冒烟 → 受控 IPv4/IPv6 拓扑 → NAS 长期稳定性与恢复测试。
 通过之后，再接入最终 Vue 界面、完整路由历史、定位和 Windows 归档。
