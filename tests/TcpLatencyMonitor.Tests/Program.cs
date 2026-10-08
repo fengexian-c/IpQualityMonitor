@@ -70,6 +70,12 @@ if(args.Length>0&&args[0]=="--locations")
     Console.WriteLine($"ALL {checks} LOCATION CHECKS PASSED.");return;
 }
 
+if(args.Length==1&&args[0]=="--metadata-checks")
+{
+    int checks=0;await MetadataChecks.Run((condition,label)=>{if(!condition)throw new InvalidOperationException("FAIL: "+label);checks++;Console.WriteLine("PASS: "+label);});
+    Console.WriteLine($"ALL {checks} OFFLINE METADATA CHECKS PASSED.");return;
+}
+
 if(args.Length>0&&args[0]=="--metadata")
 {
     var dir=Path.GetFullPath(args[2]);Directory.CreateDirectory(dir);var lookupHistory=new History(Path.Combine(dir,"history.db"));lookupHistory.Initialize();
@@ -227,3 +233,4 @@ sealed class StaleProbe:IProbe
             new Sample(DateTimeOffset.UtcNow,ProbeStatus.Success,1,1,"fresh"));
     }
 }
+

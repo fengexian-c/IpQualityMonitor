@@ -25,6 +25,8 @@ class GeoHelperPackaging(unittest.TestCase):
         docker = (ROOT / 'deploy/Dockerfile').read_text()
         runtime = docker.split(' AS runtime', 1)[1]
         self.assertIn('go1.26.5.linux-amd64.tar.gz', docker)
+        self.assertIn('-- --metadata-checks', docker)
+        self.assertNotIn('-- --metadata\n', docker)
         self.assertIn('5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053', docker)
         self.assertIn('RUN --network=none sh tools/NextTraceGeoHelper/build-linux.sh', docker)
         self.assertIn('USER 10001:10001', runtime)
