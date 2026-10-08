@@ -29,6 +29,11 @@ The hardened commit `bffd08e` passed the Docker build, 91 server checks, native 
 HTTP/ICMP/TCP/persistence gates in [run 37718356873](https://github.com/fengexian-c/IpQualityMonitor/actions/runs/37718356873).
 That run caught a deferred settings-toggle overwrite in browser QA; the edit-preservation guard and
 stronger regression were added afterward. Its failed browser gate is not claimed as a full pass.
+The corrected browser suite (12 mocked flows + real ASP.NET auth) then passed 13/13 on `5a884c2`
+in [run 37718861930](https://github.com/fengexian-c/IpQualityMonitor/actions/runs/37718861930).
+That run exposed a smoke-script assumption: a dynamically published host port was reused after
+Docker restart. The script now re-reads the actual published port before resume checks; the container
+itself had restarted cleanly and its internal readiness endpoint returned 200.
 Final outcomes for the corrected source are recorded in the
 branch's [Actions history](https://github.com/fengexian-c/IpQualityMonitor/actions/workflows/server-preview.yml).
 

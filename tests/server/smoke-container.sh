@@ -21,6 +21,7 @@ test "$(docker exec "$name" id -u)" = 10001
 docker exec "$name" sh -c "grep '^CapEff:[[:space:]]*0000000000000000$' /proc/1/status"
 docker exec "$name" getcap /usr/local/libexec/iqm-mtr-packet | grep -q cap_net_raw
 port=$(docker port "$name" 8080/tcp | head -1 | sed 's/.*://')
+printf 'Checking published loopback port %s\n' "$port"
 sudo python3 tests/server/smoke_http.py --url "http://127.0.0.1:$port" --password-file "$root/password"
 docker exec "$name" dotnet /app/IpQualityMonitor.Web.dll --healthcheck
 if [ "${IQM_BROWSER_SMOKE:-0}" = 1 ]; then
@@ -34,7 +35,10 @@ fi
 before=$(sudo cat "$root/data/instance.json")
 docker stop --time 45 "$name" >/dev/null
 test "$(docker inspect -f '{{.State.ExitCode}}' "$name")" = 0
+# Docker may allocate a different ephemeral host port when the container restarts.
 docker start "$name" >/dev/null
+port=$(docker port "$name" 8080/tcp | head -1 | sed 's/.*://')
+printf 'Checking published loopback port %s\n' "$port"
 sudo python3 tests/server/smoke_http.py --url "http://127.0.0.1:$port" --password-file "$root/password" --resume
 after=$(sudo cat "$root/data/instance.json")
 test "$before" = "$after"
