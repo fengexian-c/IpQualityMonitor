@@ -60,17 +60,17 @@ internal static class RuntimeChecks
         var settings = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         { ["IPQUALITY_ADMIN_PASSWORD_FILE"] = secret }).Build();
         var original = new AdminCredentials(storage, settings);
-        check(original.Verify(first) && !original.Verify("incorrect") && !original.Verify(null),
+        check(original.Verify("admin", first) && !original.Verify("admin", "incorrect") && !original.Verify("admin", null),
             "credential hash verifies only the original password");
         var authFile = Path.Combine(storage.DirectoryPath, "admin-auth.json");
         check(!File.ReadAllText(authFile).Contains(first), "plaintext password is never persisted to the data directory");
         File.WriteAllText(secret, second);
         var restarted = new AdminCredentials(storage, settings);
-        check(restarted.Verify(first) && !restarted.Verify(second) && restarted.SecurityStamp == original.SecurityStamp,
+        check(restarted.Verify("admin", first) && !restarted.Verify("admin", second) && restarted.SecurityStamp == original.SecurityStamp,
             "restarting does not replace credentials from the bootstrap file");
         File.Delete(authFile);
         var reset = new AdminCredentials(storage, settings);
-        check(reset.Verify(second) && reset.SecurityStamp != original.SecurityStamp,
+        check(reset.Verify("admin", second) && reset.SecurityStamp != original.SecurityStamp,
             "explicit credential reset changes the cookie security stamp");
         ServerStorage.WriteAtomic(authFile, new AdminHash(1, 210000, "invalid-base64", "invalid-base64"));
         reject(() => _ = new AdminCredentials(storage, settings), "malformed stored credentials fail closed without overwriting them");

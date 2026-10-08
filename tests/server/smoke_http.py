@@ -10,6 +10,7 @@ import urllib.error
 p = argparse.ArgumentParser()
 p.add_argument('--url', required=True)
 p.add_argument('--password-file', required=True)
+p.add_argument('--username', default='admin', help='Exact case-sensitive administrator username')
 p.add_argument('--tcp-only', action='store_true')
 p.add_argument('--resume', action='store_true', help='Validate the existing disposable smoke dataset after restart')
 a = p.parse_args()
@@ -38,7 +39,7 @@ except urllib.error.HTTPError as error:
     assert error.code == 401, error.code
 csrf = request('/api/auth/csrf')['token']
 with open(a.password_file) as f: password = f.read().rstrip('\r\n')
-request('/api/auth/login', 'POST', {'password': password})
+request('/api/auth/login', 'POST', {'username': a.username, 'password': password})
 csrf = request('/api/auth/csrf')['token']
 state = request('/api/overview')
 assert state['network'] == 'bridge'

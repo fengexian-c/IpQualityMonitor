@@ -198,7 +198,7 @@ function showRoute() {
   }
 }
 $('login-form').addEventListener('submit', async event => { event.preventDefault(); const submit = event.target.querySelector('button'); if (submit.disabled) return; submit.disabled = true;
-  try { await getCsrf(); await api('/auth/login', { method: 'POST', body: { password: $('password').value } }); $('password').value = ''; message(''); await showWorkspace(); }
+  try { await getCsrf(); await api('/auth/login', { method: 'POST', body: { username: $('username').value, password: $('password').value } }); $('password').value = ''; message(''); await showWorkspace(); }
   catch (e) { message(e.message); } finally { submit.disabled = false; } });
 $('logout').addEventListener('click', () => perform($('logout'), async current => {
   await api('/auth/logout', { method: 'POST' }); if (current()) showLogin();

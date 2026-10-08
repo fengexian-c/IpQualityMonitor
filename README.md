@@ -9,6 +9,40 @@ Windows 多目标 IP 持续监控工具。支持 ICMP、TCP、双协议分别统
 及 [验证范围](verification/server-preview/STATUS.md)。镜像自行构建，默认不开放公网；未提供固定默认密码。
 Docker UI 尚未包含 Windows 全部功能，具体差异见部署说明。
 
+### Docker 快速开始（linux/amd64）
+
+在此分支仓库根目录执行，先自行构建本地镜像；下列镜像名不是已发布的公共镜像。
+Docker 命令需要当前用户有运行权限。密码用 Bash 隐藏输入，避免把真实密码写进命令历史：
+
+```bash
+docker build --target tests -f deploy/Dockerfile .
+docker build --target runtime -t ipqualitymonitor:server-preview -f deploy/Dockerfile .
+
+export IPQUALITY_ADMIN_USERNAME=nas-admin  # 可选；不设置时为 admin
+IFS= read -r -s -p '管理员密码（16–256 字符）: ' IPQUALITY_ADMIN_PASSWORD
+printf '\n'
+export IPQUALITY_ADMIN_PASSWORD
+
+docker run -d --name ipqualitymonitor \
+  -p 127.0.0.1:8088:8080 \
+  -v ipqualitymonitor-data:/data \
+  -e IPQUALITY_ADMIN_USERNAME -e IPQUALITY_ADMIN_PASSWORD \
+  ipqualitymonitor:server-preview
+unset IPQUALITY_ADMIN_PASSWORD
+```
+
+访问 `http://127.0.0.1:8088`。NAS 局域网访问须将 `-p` 中的 `127.0.0.1` 改为 NAS 局域网 IPv4，
+并使用对应地址访问；HTTP 仅适用于可信内网调试。首次使用的 named volume 会自动建立，Web 始终以非 root 运行。
+用户名区分大小写，只接受 `[A-Za-z0-9_.-]{1,64}`；密码按原值使用，长度为 16–256 字符。
+若命令需要 `sudo`，注意它可能清除已导出的变量；详见部署说明中的环境保留方式。
+
+此简便方式接受密码可被 `docker inspect` 或拥有 Docker 管理权限的人读取的风险。
+`unset` 或重启不会删除容器中保存的环境变量；初始化成功后应按部署说明，使用**同一个 named volume**
+重建不带初始化凭据的容器。已有有效账户时，所有初始化变量均被忽略，不能用改环境变量来改名或重置密码。
+密码文件 / Compose 方式仍受支持；两种密码来源不能同时配置，即使其中一个为空也不行。
+自动重启、只读根文件系统等可选加固，以及离线恢复、旧账户兼容性与完整限制见
+[部署说明](docs/DOCKER-BRIDGE-PREVIEW.md)。
+
 ## 开始使用
 
 1. 完整解压 `IpQualityMonitor-v2.8.1-win-x64.zip` 到可写目录。

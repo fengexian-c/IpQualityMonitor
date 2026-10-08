@@ -9,8 +9,8 @@
 <header><div><strong>IP Quality Monitor</strong><span class="tag">Docker preview</span></div><button id="logout" hidden>退出登录</button></header>
 <main>
   <p id="message" role="status" aria-live="polite"></p>
-  <section id="login"><h1>连接你的采集点</h1><p>单管理员账户。密码来自首次启动时挂载的密码文件。</p>
-    <form id="login-form"><label>管理员密码<input id="password" type="password" required autocomplete="current-password" maxlength="256"></label><button type="submit">登录</button></form>
+  <section id="login"><h1>连接你的采集点</h1><p>单管理员账户。账号和密码在首次启动时初始化；已有账户不会随环境变量改变。</p>
+    <form id="login-form"><label>管理员账号<input id="username" name="username" value="admin" required autocomplete="username" maxlength="64" autocapitalize="none" spellcheck="false"></label><label>管理员密码<input id="password" type="password" required autocomplete="current-password" maxlength="256"></label><button type="submit">登录</button></form>
   </section>
   <div id="workspace" hidden>
     <section class="site"><div><h1 id="site-name">采集点</h1><p id="site-info"></p></div><span class="tag">bridge · 单实例</span></section>

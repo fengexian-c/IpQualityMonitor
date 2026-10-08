@@ -29,6 +29,10 @@ services:
       IPQUALITY_DATA_DIR: /data
       IPQUALITY_SITE_NAME: "${IPQUALITY_SITE_NAME:-家庭 NAS · Docker bridge}"
       IPQUALITY_TIME_ZONE: "${IPQUALITY_TIME_ZONE:-Asia/Shanghai}"
+      # The single '-' preserves an explicitly empty username so first bootstrap rejects it.
+      IPQUALITY_ADMIN_USERNAME: "${IPQUALITY_ADMIN_USERNAME-admin}"
+      # File bootstrap only. Do not add IPQUALITY_ADMIN_PASSWORD, even with an empty value.
+      # Existing valid auth ignores all bootstrap values; they cannot rename/reset an account.
       IPQUALITY_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
       IPQUALITY_SECURE_COOKIES: "${IPQUALITY_SECURE_COOKIES:-false}"
       IPQUALITY_TRUSTED_PROXIES: "${IPQUALITY_TRUSTED_PROXIES:-}"

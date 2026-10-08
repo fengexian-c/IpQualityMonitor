@@ -80,14 +80,57 @@ class SourceContracts(unittest.TestCase):
         for ip in ['8.8.8.8', '1.1.1.1']:
             self.assertNotIn(ip, text)
 
-    def test_password_is_file_not_compose_literal(self):
+    def test_bootstrap_sources_and_compose_secret_file(self):
         compose = (ROOT / 'deploy/compose.yaml').read_text()
         self.assertIn('IPQUALITY_ADMIN_PASSWORD_FILE:', compose)
+        self.assertIn('IPQUALITY_ADMIN_USERNAME: "${IPQUALITY_ADMIN_USERNAME-admin}"', compose)
         self.assertNotIn('IPQUALITY_ADMIN_PASSWORD:', compose)
         text = (ROOT / 'src/IpQualityMonitor.Web/AdminCredentials.cs').read_text()
         self.assertIn('FixedTimeEquals', text)
         self.assertIn('Rfc2898DeriveBytes.Pbkdf2', text)
         self.assertIn('password.Length is < 16', text)
+        for setting in ('IPQUALITY_ADMIN_USERNAME', 'IPQUALITY_ADMIN_PASSWORD', 'IPQUALITY_ADMIN_PASSWORD_FILE'):
+            self.assertIn('configuration["' + setting + '"]', text)
+        self.assertIn('StringComparison.Ordinal', text)
+        self.assertNotIn('password.Trim()', text)
+
+    def test_username_login_ui_and_required_api_fields(self):
+        html = (ROOT / 'src/IpQualityMonitor.Web/wwwroot/index.html').read_text()
+        username = re.search(r'<input\b[^>]*\bid="username"[^>]*>', html)
+        self.assertIsNotNone(username)
+        for attribute in ('required', 'autocomplete="username"', 'maxlength="64"', 'value="admin"'):
+            self.assertIn(attribute, username.group())
+        script = (ROOT / 'src/IpQualityMonitor.Web/wwwroot/app.js').read_text()
+        self.assertIn("username: $('username').value", script)
+        self.assertIn("password: $('password').value", script)
+        program = (ROOT / 'src/IpQualityMonitor.Web/Program.cs').read_text()
+        self.assertIn('admin.Verify(input.Username, input.Password)', program)
+        self.assertRegex(program, r'LoginInput\([^;]*JsonRequired[^;]*Username[^;]*JsonRequired[^;]*Password')
+        self.assertIn('ClaimTypes.Name, admin.Username', program)
+
+    def test_auth_bootstrap_fails_before_http_listener(self):
+        program = (ROOT / 'src/IpQualityMonitor.Web/Program.cs').read_text()
+        startup = program.index('_ = app.Services.GetRequiredService<AdminCredentials>();')
+        self.assertLess(startup, program.index('app.RunAsync()'))
+        credentials = (ROOT / 'src/IpQualityMonitor.Web/AdminCredentials.cs').read_text()
+        self.assertIn('File.Move(temporary, path, false)', credentials)
+        self.assertIn('UnixFileMode.UserRead | UnixFileMode.UserWrite', credentials)
+
+    def test_ci_runs_container_auth_lifecycle_and_real_browser(self):
+        smoke = (ROOT / 'tests/server/smoke-container.sh').read_text()
+        self.assertIn('python3 tests/server/auth_lifecycle.py', smoke)
+        self.assertIn('node tests/server/browser-smoke.cjs --url', smoke)
+        workflow = (ROOT / '.github/workflows/server-preview.yml').read_text()
+        self.assertIn('IQM_BROWSER_SMOKE=1 bash tests/server/smoke-container.sh', workflow)
+        runner = (ROOT / 'tests/server/auth_lifecycle.py').read_text()
+        ast.parse(runner)
+        self.assertIn("'volume', 'create', '--label', LABEL", runner)
+        self.assertIn('Refusing to reuse a pre-existing Docker volume', runner)
+        self.assertIn("'10001:10001:600'", runner)
+        self.assertIn('Pre-reset cookie remained authorized', runner)
+        self.assertIn('Offline reset altered a file besides renaming authentication', runner)
+        self.assertIn('Competing instance overwrote authentication', runner)
+        self.assertIn('Invalid persisted authentication was overwritten', runner)
 
     def test_csrf_auth_and_body_limit(self):
         text = (ROOT / 'src/IpQualityMonitor.Web/Program.cs').read_text()

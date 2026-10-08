@@ -53,6 +53,28 @@ Native synthetic mtr tests compile the actual patched decoder and inject packets
 They cover handled IPv4/IPv6 reply/error classes, late replies, malformed/foreign replies and cancellation;
 they do not prove behavior across a real routed network.
 
+## Environment-bootstrap authentication update
+
+This update adds first-initialization `IPQUALITY_ADMIN_USERNAME` and
+`IPQUALITY_ADMIN_PASSWORD`, retaining the mutually exclusive password-file alternative.
+Existing valid records take precedence over all bootstrap settings. Schema 1 retains its
+file bytes, password and old cookie stamp with username `admin`; new records use schema 2.
+Password-only API login is intentionally no longer accepted.
+
+Local verification for this update:
+
+- Release server build: zero warnings/errors; 213 server checks passed
+- Core regressions: 28 route checks, 69 route-history checks, 31 multi-target checks
+- Actual legacy published binary → updated binary HTTP upgrade preserved the schema-1
+  cookie, original credential-file bytes, and login with admin plus the original password
+- Username/password/source boundaries, exact env versus file CR/LF handling, persisted-setting
+  precedence, schema compatibility, stamp rotation, malformed records and storage lock covered
+- Fresh named-volume ownership, lifecycle, HTTP and real-browser tests are CI gates;
+  local Docker and Chromium execution are unavailable in this executor
+
+See the exact commit's Actions result for the final container/browser outcome. Tests use
+only disposable credentials and data. No image is published by this workflow.
+
 ## Scope and remaining acceptance work
 
 - Only linux/amd64 is supported by this branch's deployment settings and ongoing CI
@@ -63,7 +85,7 @@ they do not prove behavior across a real routed network.
 - Full Windows feature parity is not claimed: NextTrace/online annotations, complete route-comparison UI,
   Windows archive import, online-consistent backup UI and target editing remain future work
 - Default history retention remains Core's 31 days; bridge+ports remains mandatory
-- Default listen address is host loopback; a generated password is required; use a trusted HTTPS reverse
+- Default listen address is host loopback; an explicit initial password is required; use a trusted HTTPS reverse
   proxy or private LAN access as documented, never expose plain HTTP credentials on the public Internet
 
 ## Reproducible commands

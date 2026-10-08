@@ -43,3 +43,6 @@ sudo python3 tests/server/smoke_http.py --url "http://127.0.0.1:$port" --passwor
 after=$(sudo cat "$root/data/instance.json")
 test "$before" = "$after"
 printf '%s\n' 'PASS stable dataset identity after restart'
+
+# Real container lifecycle cases use only freshly created labeled named volumes.
+python3 tests/server/auth_lifecycle.py

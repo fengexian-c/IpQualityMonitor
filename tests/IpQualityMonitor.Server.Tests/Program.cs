@@ -126,6 +126,7 @@ await using (var network = new LinuxNetworkContext(executable, "bounded-test"))
     var cache = typeof(LinuxNetworkContext).GetField("_cache", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(network)!;
     Check((int)cache.GetType().GetProperty("Count")!.GetValue(cache)! <= 128, "network-context cache remains bounded after concurrent completion");
 }
+AuthChecks.Run(Check, Reject);
 await RuntimeChecks.RunAsync(Check, Reject);
 Console.WriteLine($"ALL {checks} SERVER CHECKS PASSED.");
 

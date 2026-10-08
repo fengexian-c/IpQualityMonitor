@@ -23,8 +23,8 @@ const webroot = path.join(root, 'src/IpQualityMonitor.Web/wwwroot');
 const options = {};
 for (let i = 2; i < process.argv.length; i += 2) {
   const key = process.argv[i];
-  if (!['--url', '--password-file', '--screenshots'].includes(key) || !process.argv[i + 1])
-    throw new Error('Usage: browser-smoke.cjs [--url URL --password-file FILE] [--screenshots DIRECTORY]');
+  if (!['--url', '--username', '--password-file', '--screenshots'].includes(key) || !process.argv[i + 1])
+    throw new Error('Usage: browser-smoke.cjs [--url URL --username USERNAME --password-file FILE] [--screenshots DIRECTORY]');
   options[key.slice(2)] = process.argv[i + 1];
 }
 if (!!options.url !== !!options['password-file']) throw new Error('--url and --password-file must be supplied together');
@@ -33,6 +33,7 @@ if (options.url && !['127.0.0.1', 'localhost', '[::1]'].includes(new URL(options
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function waitForGate(gate) { await eventually(() => gate.used, `Delayed ${gate.method} ${gate.pathname} entered`); }
 const clone = value => JSON.parse(JSON.stringify(value));
+const username = 'Browser.Test_Admin-01';
 const password = 'browser-smoke-disposable-password';
 const now = '2026-10-08T00:00:00Z';
 const policy = { intervalSeconds: 5, timeoutMilliseconds: 3000, routeMinutes: 10,
@@ -73,8 +74,8 @@ class MockApi {
     if (pathname === '/api/auth/session') return [200, { authenticated: this.authenticated }];
     if (pathname === '/api/auth/csrf') return [200, { token: 'test-only-csrf-token' }];
     if (pathname === '/api/auth/login') {
-      this.authenticated = body.password === password;
-      return this.authenticated ? [204] : [401, { error: 'Invalid password' }];
+      this.authenticated = body?.username === username && body?.password === password;
+      return this.authenticated ? [204] : [401, { error: 'Invalid credentials' }];
     }
     if (!this.authenticated) return [401, { error: 'Expired session' }];
     if (pathname === '/api/auth/logout') { this.authenticated = false; return [204]; }
@@ -197,13 +198,26 @@ async function main() {
       }
     };
 
-    await test('login failure, repeated submit, logout and private DOM clearing', async ({ page, mock }) => {
-      await page.fill('#password', 'invalid-password'); await page.locator('#login-form button').click();
+    await test('wrong username/password, repeated submit, logout and private DOM clearing', async ({ page, mock }) => {
+      const nameInput = page.locator('#username');
+      assert.equal(await nameInput.getAttribute('autocomplete'), 'username');
+      assert.equal(await page.locator('#password').getAttribute('autocomplete'), 'current-password');
+      await nameInput.fill(username.toLowerCase()); await page.fill('#password', password);
+      await page.locator('#login-form button').click();
       await textIncludes(page, '#message', '登录'); await visible(page, '#login');
+      const wrongNameMessage = await page.locator('#message').textContent();
+      await nameInput.fill(username); await page.fill('#password', 'browser-smoke-invalid-password');
+      await page.locator('#login-form button').click();
+      await eventually(() => mock.count('POST', '/api/auth/login') === 2, 'Wrong password submitted');
+      await eventually(async () => !(await page.locator('#login-form button').isDisabled()), 'Wrong password finished');
+      assert.equal(await page.locator('#message').textContent(), wrongNameMessage, 'Username/password errors are indistinguishable');
+      await visible(page, '#login'); await hidden(page, '#workspace');
       await page.fill('#password', password);
       const gate = mock.hold('POST', '/api/auth/login');
       await doubleSubmit(page, '#login-form'); await waitForGate(gate); await sleep(100);
-      assert.equal(mock.count('POST', '/api/auth/login'), 2, 'One failed login and only one pending retry');
+      assert.equal(mock.count('POST', '/api/auth/login'), 3, 'Two failed logins and only one pending retry');
+      assert.deepEqual(mock.requests.filter(r => r.pathname === '/api/auth/login').at(-1).body,
+        { username, password }, 'Both credential fields are submitted exactly');
       gate.release(); await visible(page, '#workspace'); await textIncludes(page, '#target-count', '2 / 20');
       assert.equal(await page.inputValue('#password'), '', 'Password cleared after login');
       await page.getByRole('button', { name: 'Alpha', exact: true }).click(); await textIncludes(page, '#totals', '样本 11');
@@ -336,7 +350,7 @@ async function main() {
       const old = mock.hold('GET', '/api/overview', [401, { error: 'Old request expired' }]);
       await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await waitForGate(old);
       await page.locator('#logout').click(); await visible(page, '#login');
-      await page.fill('#password', password); await page.locator('#login-form button').click();
+      await page.fill('#username', username); await page.fill('#password', password); await page.locator('#login-form button').click();
       await visible(page, '#workspace'); await textIncludes(page, '#target-count', '2 / 20');
       old.release(); await sleep(100); await visible(page, '#workspace'); await hidden(page, '#login');
     }, { ignoreAbort: true });
@@ -392,16 +406,40 @@ async function main() {
       const context = await browser.newContext(); const page = await context.newPage(); page.setDefaultTimeout(10000);
       try {
         const realPassword = fs.readFileSync(options['password-file'], 'utf8').replace(/[\r\n]+$/, '');
+        const realUsername = options.username ?? 'admin';
         await page.goto(options.url); await visible(page, '#login');
-        await page.fill('#password', realPassword); await page.locator('#login-form button').click();
+        const submitLogin = async (name, secret) => {
+          await page.fill('#username', name); await page.fill('#password', secret);
+          const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/login' && r.request().method() === 'POST');
+          await page.locator('#login-form button').click();
+          const result = await response;
+          await eventually(async () => !(await page.locator('#login-form button').isDisabled()), 'Real login finished');
+          return { status: result.status(), body: await result.text() };
+        };
+        const wrongName = await submitLogin(realUsername === realUsername.toUpperCase() ? realUsername.toLowerCase() : realUsername.toUpperCase(), realPassword);
+        assert.equal(wrongName.status, 401, 'Wrong/case-changed username denied');
+        await visible(page, '#login'); await hidden(page, '#workspace');
+        const wrongPassword = await submitLogin(realUsername, 'browser-smoke-wrong-real-password');
+        assert.deepEqual(wrongPassword, wrongName, 'Real username/password failures have the same response');
+        await page.fill('#username', realUsername); await page.fill('#password', realPassword);
+        let successfulSubmits = 0;
+        const countLogin = req => { if (new URL(req.url()).pathname === '/api/auth/login' && req.method() === 'POST') successfulSubmits++; };
+        page.on('request', countLogin);
+        await doubleSubmit(page, '#login-form');
         await visible(page, '#workspace'); await page.locator('#target-count').filter({ hasText: '/ 20' }).waitFor();
+        assert.equal(successfulSubmits, 1, 'Real repeated submit issues one login');
+        page.off('request', countLogin);
+        assert.equal(await page.inputValue('#password'), '', 'Real password cleared after login');
         const session = (await context.cookies()).find(cookie => cookie.name === 'iqm.session');
         assert.ok(session?.httpOnly, 'Real auth cookie is HttpOnly'); assert.equal(session.sameSite, 'Strict');
         await page.reload(); await visible(page, '#workspace');
+        await page.goto(base + '/away'); await page.goBack(); await visible(page, '#workspace');
+        await page.goForward(); assert.ok(page.url().endsWith('/away'));
+        await page.goBack(); await visible(page, '#workspace');
         await page.locator('#logout').click(); await visible(page, '#login');
         assert.equal((await context.request.get(options.url.replace(/\/$/, '') + '/api/overview')).status(), 401);
         await page.reload(); await visible(page, '#login'); await hidden(page, '#workspace');
-        console.log('PASS real ASP.NET login, cookie, reload, logout and protected API rejection'); passed++;
+        console.log('PASS real ASP.NET username/password errors, repeated login, cookie, reload, back/forward, logout and protected API rejection'); passed++;
       } catch (error) { console.error('FAIL real ASP.NET authentication: ' + error.message); failures++; }
       finally { await context.close(); }
     } else console.log('SKIP real ASP.NET authentication (supply --url and --password-file)');

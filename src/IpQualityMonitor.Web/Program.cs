@@ -150,9 +150,9 @@ app.MapGet("/api/auth/csrf", (HttpContext context, IAntiforgery antiforgery) =>
 app.MapGet("/api/auth/session", (HttpContext context) => Results.Ok(new { authenticated = context.User.Identity?.IsAuthenticated == true })).AllowAnonymous();
 app.MapPost("/api/auth/login", async (LoginInput input, AdminCredentials admin, HttpContext context) =>
 {
-    if (input.Password is null || !admin.Verify(input.Password)) return Results.Unauthorized();
+    if (!admin.Verify(input.Username, input.Password)) return Results.Unauthorized();
     var principal = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim(ClaimTypes.NameIdentifier, "admin"),
-        new Claim(ClaimTypes.Name, "admin"), new Claim("iqm.auth-version", admin.SecurityStamp) }, CookieAuthenticationDefaults.AuthenticationScheme));
+        new Claim(ClaimTypes.Name, admin.Username), new Claim("iqm.auth-version", admin.SecurityStamp) }, CookieAuthenticationDefaults.AuthenticationScheme));
     await context.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal);
     return Results.NoContent();
 }).AllowAnonymous().RequireRateLimiting("login");
@@ -194,7 +194,7 @@ api.MapGet("/targets/{id}/events", async (string id, MonitorRuntime runtime, Htt
     Results.Ok(await runtime.QueryAsync(h => h.LoadEvents(runtime.RouteTarget(id), 100), context.RequestAborted)));
 await app.RunAsync();
 
-internal sealed record LoginInput([property: JsonRequired] string Password);
+internal sealed record LoginInput([property: JsonRequired] string? Username, [property: JsonRequired] string? Password);
 internal sealed record AddTargetInput([property: JsonRequired] long Revision, [property: JsonRequired] TargetInput Target);
 internal sealed record RunningInput([property: JsonRequired] long Revision, [property: JsonRequired] bool Running);
 internal sealed record PolicyInput([property: JsonRequired] long Revision, [property: JsonRequired] GlobalMonitorSettings Monitoring);
