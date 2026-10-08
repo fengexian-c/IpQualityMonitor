@@ -414,7 +414,11 @@ async function main() {
           await page.locator('#login-form button').click();
           const result = await response;
           await eventually(async () => !(await page.locator('#login-form button').isDisabled()), 'Real login finished');
-          return { status: result.status(), body: await result.text() };
+          // Chromium can discard the resource body for a zero-length 401. The
+          // server's explicit length proves this response is empty; other bodies
+          // must still be retrieved, and unexpected retrieval failures must fail.
+          const body = result.headers()['content-length'] === '0' ? '' : await result.text();
+          return { status: result.status(), body };
         };
         const wrongName = await submitLogin(realUsername === realUsername.toUpperCase() ? realUsername.toLowerCase() : realUsername.toUpperCase(), realPassword);
         assert.equal(wrongName.status, 401, 'Wrong/case-changed username denied');
