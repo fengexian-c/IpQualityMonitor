@@ -23,8 +23,13 @@ arm64 is no longer maintained or included in the branch CI matrix.
 ## Hardened branch validation
 
 The workflow attached to each commit is the authoritative result for that exact source revision.
-This revision adds API invalid-input, restart/history, file-capability and native packet regression gates.
-Do not infer their result from the older baseline run above. Final outcomes are recorded in the
+This revision adds API invalid-input, restart/history, file-capability and native packet regression gates,
+plus 12 mocked browser interaction regressions and one live ASP.NET browser login/logout test.
+The hardened commit `bffd08e` passed the Docker build, 91 server checks, native decoder and live
+HTTP/ICMP/TCP/persistence gates in [run 37718356873](https://github.com/fengexian-c/IpQualityMonitor/actions/runs/37718356873).
+That run caught a deferred settings-toggle overwrite in browser QA; the edit-preservation guard and
+stronger regression were added afterward. Its failed browser gate is not claimed as a full pass.
+Final outcomes for the corrected source are recorded in the
 branch's [Actions history](https://github.com/fengexian-c/IpQualityMonitor/actions/workflows/server-preview.yml).
 
 Local verification of the hardened source passed:
@@ -37,7 +42,7 @@ Local verification of the hardened source passed:
 - Native patched-helper compile/link plus synthetic packet decoder tests; AddressSanitizer/UBSan passed
 
 Local Chromium could not launch due to sandbox socket restrictions, so actual browser execution is
-assigned to CI. LeakSanitizer was not available under local executor tracing and was not claimed.
+performed in CI. The workflow must pass its browser gate before the revision is considered validated. LeakSanitizer was not available under local executor tracing and was not claimed.
 The local environment has no Docker daemon; Docker results come from GitHub-hosted Ubuntu amd64.
 Native synthetic mtr tests compile the actual patched decoder and inject packets without live topology.
 They cover handled IPv4/IPv6 reply/error classes, late replies, malformed/foreign replies and cancellation;

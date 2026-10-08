@@ -2,6 +2,7 @@ const $ = id => document.getElementById(id);
 let csrf = '', snapshot = null, selected = localStorage.getItem('iqm.target') || '', overviewBusy = false;
 let overviewTimer = null, detailTimer = null, overviewController = null, detailController = null, routes = [];
 let sessionEpoch = 0;
+let settingsDirty = false;
 const targetMutations = new Set();
 const message = text => { $('message').textContent = text || ''; };
 async function api(path, options = {}) {
@@ -33,7 +34,8 @@ function showLogin() {
   $('targets').replaceChildren();
   for (const id of ['site-name', 'site-info', 'health', 'target-count', 'detail-name']) $(id).textContent = '';
   $('health').hidden = true;
-  $('settings').open = false; $('settings-form').reset();
+  settingsDirty = false; $('settings').open = false; $('settings-form').reset();
+  delete $('settings-form').dataset.revision;
   $('login').hidden = false; $('workspace').hidden = true; $('logout').hidden = true;
 }
 async function showWorkspace() {
@@ -114,17 +116,20 @@ async function refreshOverview() {
       for (const option of $('protocol').options)
         option.disabled = selectedProfile.mode !== 'Both' && option.value !== selectedProfile.mode;
     }
-    if (!$('settings').open) populateSettings();
+    if (!$('settings').open || !$('settings-form').dataset.revision) populateSettings();
   } catch (e) { if (epoch === sessionEpoch && !controller.signal.aborted && e.name !== 'AbortError') message(e.message); }
   finally { if (overviewController === controller) { overviewBusy = false; overviewController = null; } }
 }
 function populateSettings() {
-  if (!snapshot) return;
+  // The details toggle event is queued. A user can edit a control before it fires;
+  // never replace those edits with the last overview snapshot.
+  if (!snapshot || ($('settings').open && settingsDirty)) return;
   const form = $('settings-form'); form.dataset.revision = snapshot.config.revision;
   for (const [key, value] of Object.entries(snapshot.config.monitoring)) {
     const el = form.elements.namedItem(key); if (!el) continue;
     if (el.type === 'checkbox') el.checked = value; else el.value = value;
   }
+  settingsDirty = false;
 }
 async function select(id) {
   if (selected !== id) clearDetail();
@@ -207,7 +212,12 @@ $('add-form').addEventListener('submit', event => {
     form.reset(); message('目标已添加，尚未开始采集。'); await refreshOverview();
   });
 });
-$('settings').addEventListener('toggle', () => { if ($('settings').open) populateSettings(); });
+$('settings-form').addEventListener('input', () => { settingsDirty = true; });
+$('settings-form').addEventListener('change', () => { settingsDirty = true; });
+$('settings').addEventListener('toggle', () => {
+  if (!$('settings').open) settingsDirty = false;
+  populateSettings();
+});
 $('settings-form').addEventListener('submit', event => {
   event.preventDefault(); const form = event.target;
   perform(form.querySelector('button'), async current => {

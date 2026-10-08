@@ -231,11 +231,30 @@ async function main() {
     });
 
     await test('settings native validation and repeated save', async ({ page, mock }) => {
+      // The closed form is already populated by the initial overview. Waiting for
+      // its value alone does not wait for the queued <details> toggle handler, which
+      // refreshes those values when opened. Wait for that handler before editing.
+      await page.locator('#settings').evaluate(details => {
+        details.dataset.smokeOpened = 'pending';
+        details.addEventListener('toggle', () => {
+          if (details.open) details.dataset.smokeOpened = 'ready';
+        }, { once: true });
+      });
       await page.locator('#settings summary').click();
+      await eventually(async () => (await page.locator('#settings').getAttribute('data-smoke-opened')) === 'ready', 'Settings opening handler finished');
       const interval = page.locator('#settings-form [name=intervalSeconds]');
-      await eventually(async () => (await interval.inputValue()) === '5', 'Settings populated');
-      await interval.fill('0'); await page.locator('#settings-form button').click();
-      assert.equal(await interval.evaluate(input => input.validity.valid), false);
+      assert.equal(await interval.inputValue(), '5', 'Settings populated');
+      const invalidState = () => interval.evaluate(input => ({
+        value: input.value, min: input.min, valid: input.validity.valid, rangeUnderflow: input.validity.rangeUnderflow
+      }));
+      const expectedInvalid = { value: '0', min: '1', valid: false, rangeUnderflow: true };
+      await interval.fill('0');
+      // Reproduce an opening event delivered after the first edit, without relying
+      // on browser scheduling: a queued toggle must not overwrite unsaved input.
+      await page.locator('#settings').evaluate(details => details.dispatchEvent(new Event('toggle')));
+      assert.deepEqual(await invalidState(), expectedInvalid, 'Late toggle preserves invalid edited value before Save');
+      await page.locator('#settings-form button').click();
+      assert.deepEqual(await invalidState(), expectedInvalid, 'Save preserves invalid input and native validation');
       assert.equal(mock.count('PUT', '/api/settings'), 0, 'Invalid settings were not submitted');
       await interval.fill('2');
       const gate = mock.hold('PUT', '/api/settings');
