@@ -1,0 +1,6 @@
+# Optional override. Requires a Docker Engine and host with functional IPv6 routing/NAT.
+# Enabling the network alone does not prove that Internet IPv6 is reachable.
+# docker compose --env-file deploy/.env -f deploy/compose.yaml -f deploy/compose.ipv6.yaml up -d --build
+networks:
+  monitor:
+    enable_ipv6: true

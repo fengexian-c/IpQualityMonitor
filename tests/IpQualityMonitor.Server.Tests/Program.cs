@@ -1,0 +1,116 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Net;
+using System.Reflection;
+using IpQualityMonitor.Application;
+using IpQualityMonitor.Linux;
+using TcpLatencyMonitor.Core;
+
+if (args.Contains("--fake-mtr")) { await FakeMtr(); return; }
+int checks = 0;
+void Check(bool condition, string label)
+{ if (!condition) throw new InvalidOperationException("FAIL " + label); Console.WriteLine("PASS " + label); checks++; }
+void Reject(Action action, string label)
+{ var rejected = false; try { action(); } catch (Exception) { rejected = true; } Check(rejected, label); }
+var ip = IPAddress.Loopback;
+var echo = PacketMapping.ToHop(PacketReply.Parse("1 reply ip-4 127.0.0.1 round-trip-time 1250"), ip, 1, 1);
+Check(echo.Status == 0 && echo.RttMs == 1.25, "microsecond RTT converted without integer truncation");
+var ttl = PacketMapping.ToHop(PacketReply.Parse("2 ttl-expired ip-4 192.0.2.1 round-trip-time 987"), ip, 2, 1);
+Check(ttl.Status == 11013 && ttl.RttMs == .987, "TTL expiry keeps the legacy route contract");
+var error = PacketMapping.ToHop(PacketReply.Parse("3 icmp-error ip-4 127.0.0.1 round-trip-time 100 icmp-type 3 icmp-code 3"), ip, 3, 1);
+Check(error.Status == 11005 && error.RttMs is null, "ICMP port unreachable is never counted as Echo success");
+var v6 = PacketMapping.ToHop(PacketReply.Parse("4 icmp-error ip-6 ::1 round-trip-time 100 icmp-type 1 icmp-code 4"), IPAddress.IPv6Loopback, 1, 1);
+Check(v6.Status == 11003, "ICMPv6 unreachable remains a failure");
+Check(PacketMapping.ToHop(PacketReply.Parse("5 no-reply"), ip, 1, 1).Status == 11010, "only no-reply maps to a timeout");
+Check(PacketMapping.ToHop(PacketReply.Parse("6 probes-exhausted"), ip, 1, 1).Status == PacketMapping.LocalError, "resource exhaustion is local");
+Reject(() => PacketReply.Parse("1 reply ip-4"), "reject odd field count");
+Reject(() => PacketReply.Parse("1 reply ip-4 1.2.3.4 ip-4 1.2.3.5"), "reject duplicate keys");
+Reject(() => PacketReply.Parse(new string('a', 8193)), "bound response length");
+Reject(() => PacketMapping.ToHop(PacketReply.Parse("7 reply ip-4 127.0.0.1 round-trip-time -1"), ip, 1, 1), "reject negative RTT");
+Reject(() => PacketMapping.ToHop(PacketReply.Parse("8 icmp-error ip-4 127.0.0.1"), ip, 1, 1), "reject errors missing type/code");
+var a = LinuxNetworkContext.Parse("[{\"dst\":\"1.1.1.1\",\"dev\":\"eth0\",\"prefsrc\":\"172.20.0.2\",\"gateway\":\"172.20.0.1\"}]", "site");
+var b = LinuxNetworkContext.Parse("[{\"dst\":\"8.8.8.8\",\"dev\":\"eth0\",\"prefsrc\":\"172.20.0.2\",\"gateway\":\"172.20.0.1\"}]", "site");
+Check(a.Key == b.Key && a.Description.Contains("bridge"), "stable context excludes destination and identifies bridge");
+var c = LinuxNetworkContext.Parse("[{\"dev\":\"eth0\",\"prefsrc\":\"172.20.0.3\",\"gateway\":\"172.20.0.1\"}]", "site");
+Check(a.Key != c.Key, "source-address change creates a context boundary");
+Reject(() => LinuxNetworkContext.Parse("[]", "site"), "missing route is not invented");
+Reject(() => LinuxNetworkContext.Parse("[{\"dev\":\"eth0\"}]", "site"), "source-less route is not comparable");
+var directory = Path.Combine(Path.GetTempPath(), "iqm-check-" + Guid.NewGuid().ToString("N"));
+Directory.CreateDirectory(directory);
+try
+{
+    string identity;
+    using (var storage = new ServerStorage(directory, "test"))
+    {
+        identity = storage.Site.Id; var config = storage.Load();
+        Check(config.Profiles.Count == 0, "new installation has no automatic public targets");
+        Reject(() => { using var second = new ServerStorage(directory, "other"); }, "second writer cannot own the dataset");
+        storage.Save(config with { Revision = 1 });
+    }
+    using (var storage = new ServerStorage(directory, "renamed"))
+        Check(storage.Site.Id == identity && storage.Load().Revision == 1, "site identity and config survive restart");
+    File.WriteAllText(Path.Combine(directory, "settings.server.json"), "broken-json");
+    using (var storage = new ServerStorage(directory, "test"))
+        Reject(() => storage.Load(), "broken settings do not silently reset");
+    Check(File.ReadAllText(Path.Combine(directory, "settings.server.json")) == "broken-json", "broken input preserved");
+    var foreign = Path.Combine(directory, "foreign"); Directory.CreateDirectory(foreign);
+    File.WriteAllText(Path.Combine(foreign, "history.db"), "untouched");
+    Reject(() => { using var storage = new ServerStorage(foreign, "test"); }, "unmarked Windows history is refused before initialization");
+    Check(File.ReadAllText(Path.Combine(foreign, "history.db")) == "untouched", "foreign history remains byte-for-byte intact");
+}
+finally { Directory.Delete(directory, true); }
+
+var executable = Environment.ProcessPath ?? throw new InvalidOperationException("No process path");
+var fakeArguments = Path.GetFileNameWithoutExtension(executable).Equals("dotnet", StringComparison.OrdinalIgnoreCase)
+    ? new[] { Assembly.GetExecutingAssembly().Location, "--fake-mtr" } : new[] { "--fake-mtr" };
+await using (var client = new MtrPacketClient(executable, fakeArguments))
+{
+    var replies = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => client.ProbeAsync(ip, 128, 300, CancellationToken.None)));
+    Check(replies.All(r => r.Kind == "reply") && replies.Select(r => r.Token).Distinct().Count() == 20, "concurrent requests stay associated");
+    var clock = Stopwatch.StartNew();
+    var timeout = await client.ProbeAsync(IPAddress.Parse("127.0.0.2"), 128, 150, CancellationToken.None);
+    Check(timeout.Kind == "no-reply" && clock.ElapsedMilliseconds >= 100, "millisecond request sent to helper");
+    using var cancel = new CancellationTokenSource(100);
+    var cancelled = client.ProbeAsync(IPAddress.Parse("127.0.0.4"), 128, 3000, cancel.Token);
+    var other = client.ProbeAsync(ip, 128, 500, CancellationToken.None);
+    var wasCancelled = false;
+    try { await cancelled; } catch (OperationCanceledException) { wasCancelled = true; }
+    Check(wasCancelled && (await other).Kind == "reply", "one cancellation does not cancel another target");
+    Check(client.Pending == 0, "acknowledged cancellation leaves no pending request");
+    var sample = await new LinuxIcmpProbe(client).RunAsync(Target.Parse("127.0.0.3", 0, ProbeProtocol.Icmp, 300),
+        TimeSpan.FromMilliseconds(300), CancellationToken.None);
+    Check(sample.Status == ProbeStatus.LocalError && sample.LatencyMs is null, "helper crash is not remote packet loss");
+}
+Console.WriteLine($"ALL {checks} SERVER CHECKS PASSED.");
+
+static async Task FakeMtr()
+{
+    var inFlight = new ConcurrentDictionary<int, CancellationTokenSource>();
+    var outputLock = new object();
+    void Reply(string line) { lock (outputLock) { Console.WriteLine(line); Console.Out.Flush(); } }
+    string? line;
+    while ((line = await Console.In.ReadLineAsync()) is not null)
+    {
+        var parts = line.Split(' '); int id = int.Parse(parts[0]);
+        if (parts[1] == "check-support") { Reply($"{id} feature-support support ok"); continue; }
+        if (parts[1] == "cancel-probe")
+        { if (inFlight.TryRemove(id, out var old)) old.Cancel(); Reply($"{id} cancelled"); continue; }
+        var fields = new Dictionary<string, string>();
+        for (int i = 2; i < parts.Length; i += 2) fields.Add(parts[i], parts[i + 1]);
+        var address = fields.GetValueOrDefault("ip-4", "::1");
+        if (address == "127.0.0.3") Environment.Exit(42);
+        var cts = new CancellationTokenSource(); inFlight[id] = cts;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (address == "127.0.0.4") await Task.Delay(10000, cts.Token);
+                else if (address == "127.0.0.2") await Task.Delay(int.Parse(fields["timeout-ms"]), cts.Token);
+                else await Task.Delay(id % 9, cts.Token);
+                if (inFlight.TryRemove(id, out _))
+                    Reply(address == "127.0.0.2" ? $"{id} no-reply" : $"{id} reply ip-4 127.0.0.1 round-trip-time 100");
+            }
+            catch (OperationCanceledException) { }
+        });
+    }
+}

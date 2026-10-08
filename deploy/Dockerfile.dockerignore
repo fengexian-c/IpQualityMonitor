@@ -1,0 +1,16 @@
+.git
+**/bin
+**/obj
+**/__pycache__
+**/node_modules
+**/data
+**/secrets
+**/.env
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/*.dpapi
+**/admin_password.txt
+**/*.zip
+outputs
+third_party

@@ -1,0 +1,20 @@
+test_compose_bridge_and_ports (test_contracts.SourceContracts.test_compose_bridge_and_ports) ... ok
+test_csrf_auth_and_body_limit (test_contracts.SourceContracts.test_csrf_auth_and_body_limit) ... ok
+test_final_file_capability (test_contracts.SourceContracts.test_final_file_capability) ... ok
+test_fixed_upstream (test_contracts.SourceContracts.test_fixed_upstream) ... ok
+test_healthcheck_exits_before_host_construction (test_contracts.SourceContracts.test_healthcheck_exits_before_host_construction) ... ok
+test_ipv6_is_explicit_optional_override (test_contracts.SourceContracts.test_ipv6_is_explicit_optional_override) ... ok
+test_native_clock_and_timeout_arithmetic (test_contracts.SourceContracts.test_native_clock_and_timeout_arithmetic) ... ok
+test_no_innerhtml_for_untrusted_target_labels (test_contracts.SourceContracts.test_no_innerhtml_for_untrusted_target_labels) ... ok
+test_no_network_targets_seeded (test_contracts.SourceContracts.test_no_network_targets_seeded) ... ok
+test_no_terminal_commands_interpolated_into_shell (test_contracts.SourceContracts.test_no_terminal_commands_interpolated_into_shell) ... ok
+test_password_is_file_not_compose_literal (test_contracts.SourceContracts.test_password_is_file_not_compose_literal) ... ok
+test_patch_anchor_fails_closed (test_contracts.SourceContracts.test_patch_anchor_fails_closed) ... ok
+test_patch_rejects_unknown_source_before_writing (test_contracts.SourceContracts.test_patch_rejects_unknown_source_before_writing) ... ok
+test_private_transport_limits_and_contract_gate (test_contracts.SourceContracts.test_private_transport_limits_and_contract_gate) ... ok
+test_project_xml_and_dependency_direction (test_contracts.SourceContracts.test_project_xml_and_dependency_direction) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.038s
+
+OK

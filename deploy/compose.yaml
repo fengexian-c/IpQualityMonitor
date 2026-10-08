@@ -1,0 +1,58 @@
+name: ipqualitymonitor
+
+services:
+  ipqualitymonitor:
+    # Local build, NOT a claim that a prebuilt public image already exists.
+    image: ipqualitymonitor:server-preview
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+      target: runtime
+    ports:
+      - "${IPQUALITY_BIND_ADDRESS:-127.0.0.1}:${IPQUALITY_HTTP_PORT:-8088}:8080"
+    networks:
+      - monitor
+    user: "10001:10001"
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 45s
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=64m
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      IPQUALITY_DATA_DIR: /data
+      IPQUALITY_SITE_NAME: "${IPQUALITY_SITE_NAME:-家庭 NAS · Docker bridge}"
+      IPQUALITY_TIME_ZONE: "${IPQUALITY_TIME_ZONE:-Asia/Shanghai}"
+      IPQUALITY_ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      IPQUALITY_SECURE_COOKIES: "${IPQUALITY_SECURE_COOKIES:-false}"
+      IPQUALITY_TRUSTED_PROXIES: "${IPQUALITY_TRUSTED_PROXIES:-}"
+    secrets:
+      - admin_password
+    volumes:
+      - ./data:/data
+    mem_limit: 512m
+    pids_limit: 128
+    logging:
+      driver: local
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "dotnet", "/app/IpQualityMonitor.Web.dll", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+
+networks:
+  monitor:
+    driver: bridge
+
+secrets:
+  admin_password:
+    file: ./secrets/admin_password.txt
