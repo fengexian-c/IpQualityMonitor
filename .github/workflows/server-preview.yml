@@ -1,4 +1,4 @@
-name: Server preview checks
+name: Docker branch checks
 on:
   workflow_dispatch:
   pull_request:
@@ -11,7 +11,7 @@ on:
       - 'deploy/**'
       - '.github/workflows/server-preview.yml'
   push:
-    branches: [main, 'feature/docker-*']
+    branches: [docker, 'docker/**', 'feature/docker-*']
     paths:
       - 'src/TcpLatencyMonitor.Core/**'
       - 'src/IpQualityMonitor.*/**'
@@ -27,8 +27,17 @@ concurrency:
   cancel-in-progress: true
 jobs:
   linux-preview:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    name: Linux ${{ matrix.arch }} build and smoke
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - name: Static contracts
@@ -41,4 +50,4 @@ jobs:
         run: docker build -t ipqualitymonitor:server-preview -f deploy/Dockerfile .
       - name: Bridge and HTTP smoke test
         run: bash tests/server/smoke-container.sh
-# Deliberately no push to GHCR and no release publication in this first preview.
+# Build/test only: no credentials, registry publication, or deployment.
